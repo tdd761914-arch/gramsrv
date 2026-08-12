@@ -198,7 +198,7 @@ func TestConfirmCompletesOnlyAfterVerifierMatches(t *testing.T) {
 
 func TestHTTPPageAndMetadata(t *testing.T) {
 	now := time.Now()
-	service, _, _, _ := testService(t, now)
+	service, ledger, _, _ := testService(t, now)
 	page := httptest.NewRecorder()
 	service.ServeWithdrawalPage(page, httptest.NewRequest(http.MethodGet, "/gift-withdrawal/withdraw-token", nil), "withdraw-token")
 	if page.Code != http.StatusOK || !strings.Contains(page.Body.String(), "TON Mainnet") || !strings.Contains(page.Body.String(), "Mint gift on TON") {
