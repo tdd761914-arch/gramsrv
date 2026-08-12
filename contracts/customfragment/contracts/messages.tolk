@@ -28,7 +28,7 @@ struct (0x5fcc3d14) TransferNft {
     forwardPayload: RemainingBitsAndRefs,
 }
 
-struct (0x05138d91) StaticDataRequest {
+struct (0x2fcb26a2) StaticDataRequest {
     queryId: uint64,
 }
 

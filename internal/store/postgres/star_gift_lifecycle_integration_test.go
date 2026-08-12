@@ -794,6 +794,18 @@ can_resell_at,drop_original_details_stars,can_craft_at FROM peer_star_gifts WHER
 	if err != nil || completed.Status != "completed" || completed.Gift.OwnerAddress == "" || completed.Gift.GiftAddress == "" {
 		t.Fatalf("complete local withdrawal = %+v err %v", completed, err)
 	}
+	// Once a collectible is on-chain, payments.transferStarGift must never move
+	// the stale server-side projection. Both the free RPC and the paid form end
+	// up in TransferStarGift, so this store-level guard covers every input alias.
+	if _, err := lifecycle.TransferStarGift(ctx, domain.StarGiftTransferRequest{
+		ActorUserID: owner.ID,
+		Ref:         withdrawalReq.Ref,
+		To:          domain.Peer{Type: domain.PeerTypeUser, ID: buyer.ID},
+		CommandKey:  "transfer-exported-" + suffix,
+		Date:        now + 153,
+	}); !errors.Is(err, domain.ErrStarGiftTransferUnavailable) {
+		t.Fatalf("transfer accepted exported gift: %v", err)
+	}
 
 	// Auction winner reservation is consumed; the unreachable lower bid is
 	// refunded atomically. Award delivery is durable and includes gift_num.
