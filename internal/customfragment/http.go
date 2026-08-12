@@ -3,6 +3,8 @@ package customfragment
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	_ "embed"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -24,6 +26,15 @@ import (
 )
 
 const maxGiftImageCacheEntries = 128
+
+const owlJumpingRopeJSONSHA256 = "85b10fc39941272ad3a370fe07c08d6b36453917550c9aa9f79d94c0814d999b"
+
+// owlJumpingRopeRaster is a deterministic frame rendered from the catalog's
+// Owl Jumping Rope model. It is a compatibility fallback for optimized TGS
+// documents that older system rlottie releases parse as a transparent frame.
+//
+//go:embed assets/owl-jumping-rope.png
+var owlJumpingRopeRaster []byte
 
 type collectibleModelAnimationResolver interface {
 	CollectibleAnimationJSON(ctx context.Context, giftID int64, kind domain.StarGiftCollectibleAttributeKind, attributeID int64) ([]byte, bool, error)
@@ -221,15 +232,21 @@ func (s *Service) giftImagePNG(ctx context.Context, gift domain.UniqueStarGift) 
 	if err != nil || !found || len(modelJSON) == 0 {
 		return nil, fmt.Errorf("load selected model animation: %w", err)
 	}
-	const canvasSize, modelSize = 1024, 896
-	model, err := s.renderModel(modelJSON, modelSize, modelSize, 0.22)
-	if err != nil {
-		return nil, fmt.Errorf("render selected model: %w", err)
+	const canvasSize, modelSize = 1024, 1024
+	model, renderErr := s.renderModel(modelJSON, modelSize, modelSize, 0.22)
+	if renderErr != nil || !hasVisibleAlpha(model) {
+		model, err = fallbackModelRaster(modelJSON)
+		if err != nil {
+			if renderErr != nil {
+				return nil, fmt.Errorf("render selected model: %w", renderErr)
+			}
+			return nil, errors.New("render selected model: transparent Lottie frame")
+		}
 	}
 	canvas := renderBackdrop(canvasSize, gift.Backdrop.CenterColor, gift.Backdrop.EdgeColor)
 	// Deliberately composite only the selected model. The collectible pattern is
 	// a Telegram profile-card effect and is excluded from the NFT poster.
-	draw.Draw(canvas, image.Rect(64, 48, 64+modelSize, 48+modelSize), model, image.Point{}, draw.Over)
+	draw.Draw(canvas, image.Rect(0, 0, modelSize, modelSize), model, image.Point{}, draw.Over)
 	var encoded bytes.Buffer
 	encoder := png.Encoder{CompressionLevel: png.BestSpeed}
 	if err := encoder.Encode(&encoded, canvas); err != nil {
@@ -243,6 +260,35 @@ func (s *Service) giftImagePNG(ctx context.Context, gift domain.UniqueStarGift) 
 	s.imageCache[gift.Slug] = append([]byte(nil), data...)
 	s.imageMu.Unlock()
 	return data, nil
+}
+
+func hasVisibleAlpha(model *image.NRGBA) bool {
+	if model == nil {
+		return false
+	}
+	for offset := 3; offset < len(model.Pix); offset += 4 {
+		if model.Pix[offset] != 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func fallbackModelRaster(modelJSON []byte) (*image.NRGBA, error) {
+	sum := sha256.Sum256(modelJSON)
+	if fmt.Sprintf("%x", sum) != owlJumpingRopeJSONSHA256 {
+		return nil, errors.New("no raster fallback for selected model")
+	}
+	decoded, err := png.Decode(bytes.NewReader(owlJumpingRopeRaster))
+	if err != nil {
+		return nil, fmt.Errorf("decode model raster fallback: %w", err)
+	}
+	if decoded.Bounds() != image.Rect(0, 0, 1024, 1024) {
+		return nil, errors.New("model raster fallback has invalid dimensions")
+	}
+	out := image.NewNRGBA(decoded.Bounds())
+	draw.Draw(out, out.Bounds(), decoded, decoded.Bounds().Min, draw.Src)
+	return out, nil
 }
 
 func renderBackdrop(size, centerRGB, edgeRGB int) *image.NRGBA {

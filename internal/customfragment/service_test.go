@@ -228,7 +228,7 @@ func TestHTTPPageAndMetadata(t *testing.T) {
 	if ledger.animationKind != domain.StarGiftCollectibleModel || ledger.animationAttributeID != 11 {
 		t.Fatalf("poster requested %s/%d; pattern must not be rendered", ledger.animationKind, ledger.animationAttributeID)
 	}
-	r, g, b, a := decoded.At(512, 496).RGBA()
+	r, g, b, a := decoded.At(512, 512).RGBA()
 	if r != 0xffff || g != 0 || b != 0 || a != 0xffff {
 		t.Fatalf("poster model pixel = %04x/%04x/%04x/%04x", r, g, b, a)
 	}
