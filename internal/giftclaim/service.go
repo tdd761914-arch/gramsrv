@@ -26,6 +26,8 @@ var (
 
 type Store interface {
 	ResolveOnChainGift(context.Context, string) (domain.UniqueStarGift, bool, error)
+	ListOnChainGifts(context.Context, int64, int) ([]domain.UniqueStarGift, error)
+	ReconcileOnChainOwner(context.Context, int64, string, string, string) (bool, error)
 	ProfileUsername(context.Context, int64) (string, error)
 	CreateChallenge(context.Context, int64, int64, time.Time, time.Duration) (domain.StarGiftClaimChallenge, error)
 	ResolveChallenge(context.Context, string, int64, int) (domain.StarGiftClaimChallenge, bool, error)
@@ -35,31 +37,36 @@ type Store interface {
 type Verifier interface {
 	VerifyWalletProof(context.Context, string, string, tonwallet.TonConnectProof, []byte, time.Duration) error
 	VerifyMint(context.Context, string, *big.Int, string) (string, error)
+	CurrentNFTOwner(context.Context, string, *big.Int, string) (string, bool, error)
 	Close()
 }
 
 type Config struct {
-	PublicBaseURL string
-	BotToken      string
-	Collection    string
-	AppName       string
-	ChallengeTTL  time.Duration
-	ProofTTL      time.Duration
-	InitDataTTL   time.Duration
+	PublicBaseURL         string
+	BotToken              string
+	Collection            string
+	AppName               string
+	ChallengeTTL          time.Duration
+	ProofTTL              time.Duration
+	InitDataTTL           time.Duration
+	OwnershipSyncInterval time.Duration
+	OwnershipSyncBatch    int
 }
 
 type Service struct {
-	publicBaseURL string
-	proofDomain   string
-	botToken      string
-	collection    string
-	appName       string
-	challengeTTL  time.Duration
-	proofTTL      time.Duration
-	initDataTTL   time.Duration
-	store         Store
-	verifier      Verifier
-	logger        *zap.Logger
+	publicBaseURL         string
+	proofDomain           string
+	botToken              string
+	collection            string
+	appName               string
+	challengeTTL          time.Duration
+	proofTTL              time.Duration
+	initDataTTL           time.Duration
+	ownershipSyncInterval time.Duration
+	ownershipSyncBatch    int
+	store                 Store
+	verifier              Verifier
+	logger                *zap.Logger
 }
 
 type ChallengeResponse struct {
@@ -120,8 +127,16 @@ func New(cfg Config, store Store, verifier Verifier, logger *zap.Logger) (*Servi
 	if cfg.InitDataTTL == 0 {
 		cfg.InitDataTTL = 15 * time.Minute
 	}
+	if cfg.OwnershipSyncInterval == 0 {
+		cfg.OwnershipSyncInterval = 15 * time.Second
+	}
+	if cfg.OwnershipSyncBatch == 0 {
+		cfg.OwnershipSyncBatch = 100
+	}
 	if cfg.ChallengeTTL < time.Minute || cfg.ChallengeTTL > 15*time.Minute ||
-		cfg.ProofTTL < time.Minute || cfg.ProofTTL > 15*time.Minute || cfg.InitDataTTL > 24*time.Hour {
+		cfg.ProofTTL < time.Minute || cfg.ProofTTL > 15*time.Minute || cfg.InitDataTTL > 24*time.Hour ||
+		cfg.OwnershipSyncInterval < 5*time.Second || cfg.OwnershipSyncInterval > time.Hour ||
+		cfg.OwnershipSyncBatch < 1 || cfg.OwnershipSyncBatch > 1000 {
 		return nil, fmt.Errorf("gift claim TTL is invalid")
 	}
 	if logger == nil {
@@ -136,6 +151,7 @@ func New(cfg Config, store Store, verifier Verifier, logger *zap.Logger) (*Servi
 		publicBaseURL: strings.TrimRight(base.String(), "/"), proofDomain: base.Host,
 		botToken: strings.TrimSpace(cfg.BotToken), collection: strings.TrimSpace(cfg.Collection), appName: appName,
 		challengeTTL: cfg.ChallengeTTL, proofTTL: cfg.ProofTTL, initDataTTL: cfg.InitDataTTL,
+		ownershipSyncInterval: cfg.OwnershipSyncInterval, ownershipSyncBatch: cfg.OwnershipSyncBatch,
 		store: store, verifier: verifier, logger: logger,
 	}, nil
 }

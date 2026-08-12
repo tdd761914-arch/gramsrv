@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -793,6 +794,31 @@ can_resell_at,drop_original_details_stars,can_craft_at FROM peer_star_gifts WHER
 	completed, err := lifecycle.CompleteStarGiftWithdrawal(ctx, recorded.ProviderRequestID, now+152)
 	if err != nil || completed.Status != "completed" || completed.Gift.OwnerAddress == "" || completed.Gift.GiftAddress == "" {
 		t.Fatalf("complete local withdrawal = %+v err %v", completed, err)
+	}
+	// A TON transfer changes both the wallet projection and the profile host.
+	// The former profile must lose the gift until the new wallet owner proves
+	// ownership through @claim.
+	if _, err := pool.Exec(ctx, `UPDATE unique_star_gifts SET host_peer_type='user',host_peer_id=$2 WHERE id=$1`,
+		transferred.Unique.ID, owner.ID); err != nil {
+		t.Fatalf("stage claimed exported gift: %v", err)
+	}
+	claimStore := NewStarGiftClaimStore(pool)
+	newWallet := "0:" + strings.Repeat("ab", 32)
+	changed, err := claimStore.ReconcileOnChainOwner(ctx, transferred.Unique.ID, completed.Gift.GiftAddress,
+		completed.Gift.OwnerAddress, newWallet)
+	if err != nil || !changed {
+		t.Fatalf("reconcile TON owner = changed %v err %v", changed, err)
+	}
+	var reconciledWallet, reconciledHostType string
+	var reconciledHostID int64
+	if err := pool.QueryRow(ctx, `SELECT owner_address,host_peer_type,host_peer_id FROM unique_star_gifts WHERE id=$1`,
+		transferred.Unique.ID).Scan(&reconciledWallet, &reconciledHostType, &reconciledHostID); err != nil ||
+		reconciledWallet != newWallet || reconciledHostType != "user" || reconciledHostID != domain.GiftRelayerUserID {
+		t.Fatalf("reconciled TON owner = wallet %q host %s:%d err %v", reconciledWallet, reconciledHostType, reconciledHostID, err)
+	}
+	if changed, err := claimStore.ReconcileOnChainOwner(ctx, transferred.Unique.ID, completed.Gift.GiftAddress,
+		completed.Gift.OwnerAddress, newWallet); err != nil || changed {
+		t.Fatalf("stale TON owner CAS = changed %v err %v", changed, err)
 	}
 	// Once a collectible is on-chain, payments.transferStarGift must never move
 	// the stale server-side projection. Both the free RPC and the paid form end

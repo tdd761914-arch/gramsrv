@@ -85,6 +85,45 @@ func (v *MainnetVerifier) VerifyMint(ctx context.Context, collectionRaw string, 
 	return itemAddress.StringRaw(), nil
 }
 
+// CurrentNFTOwner resolves the current owner of one NFT from the configured
+// collection. The boolean is false when itemRaw belongs to another collection
+// generation. That distinction lets the ownership watcher ignore immutable
+// NFTs minted by an older deployment without mutating their Gramsrv records.
+func (v *MainnetVerifier) CurrentNFTOwner(ctx context.Context, collectionRaw string, itemIndex *big.Int, itemRaw string) (string, bool, error) {
+	if itemIndex == nil || itemIndex.Sign() < 0 {
+		return "", false, fmt.Errorf("invalid item index")
+	}
+	collection, err := parseMainnetAddress(collectionRaw)
+	if err != nil {
+		return "", false, err
+	}
+	item, err := parseMainnetAddress(itemRaw)
+	if err != nil {
+		return "", false, err
+	}
+	api, err := v.client(ctx)
+	if err != nil {
+		return "", false, err
+	}
+	derived, err := nft.NewCollectionClient(api, collection).GetNFTAddressByIndex(ctx, itemIndex)
+	if err != nil {
+		return "", false, fmt.Errorf("resolve NFT address: %w", err)
+	}
+	if !derived.Equals(item) {
+		return "", false, nil
+	}
+	data, err := nft.NewItemClient(api, item).GetNFTData(ctx)
+	if err != nil {
+		return "", true, fmt.Errorf("read NFT data: %w", err)
+	}
+	if !data.Initialized || data.Index == nil || data.Index.Cmp(itemIndex) != 0 ||
+		data.CollectionAddress == nil || !data.CollectionAddress.Equals(collection) ||
+		data.OwnerAddress == nil || data.OwnerAddress.IsAddrNone() {
+		return "", true, fmt.Errorf("NFT data does not match collection identity")
+	}
+	return data.OwnerAddress.StringRaw(), true, nil
+}
+
 func (v *MainnetVerifier) client(ctx context.Context) (ton.APIClientWrapped, error) {
 	v.mu.Lock()
 	defer v.mu.Unlock()

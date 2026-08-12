@@ -52,6 +52,60 @@ WHERE (lower(slug)=lower($1) OR gift_address=$1)
 	return NewStarGiftStore(s.db).UniqueByID(ctx, id)
 }
 
+// ListOnChainGifts returns a bounded page of exported collectibles. The
+// verifier independently checks that each item belongs to the active TON
+// collection before any record can be changed.
+func (s *StarGiftClaimStore) ListOnChainGifts(ctx context.Context, afterID int64, limit int) ([]domain.UniqueStarGift, error) {
+	if s == nil || s.db == nil || afterID < 0 || limit <= 0 {
+		return []domain.UniqueStarGift{}, nil
+	}
+	if limit > 1000 {
+		limit = 1000
+	}
+	rows, err := s.db.Query(ctx, `SELECT u.id,u.slug,u.owner_address,u.gift_address
+FROM unique_star_gifts u
+JOIN peer_star_gifts p ON p.id=u.source_saved_gift_id
+WHERE u.id>$1 AND p.lifecycle_status='exported'
+  AND u.owner_address<>'' AND u.gift_address<>'' AND NOT u.burned
+ORDER BY u.id LIMIT $2`, afterID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list on-chain star gifts: %w", err)
+	}
+	defer rows.Close()
+	gifts := make([]domain.UniqueStarGift, 0, limit)
+	for rows.Next() {
+		var gift domain.UniqueStarGift
+		if err := rows.Scan(&gift.ID, &gift.Slug, &gift.OwnerAddress, &gift.GiftAddress); err != nil {
+			return nil, fmt.Errorf("scan on-chain star gift: %w", err)
+		}
+		gifts = append(gifts, gift)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate on-chain star gifts: %w", err)
+	}
+	return gifts, nil
+}
+
+// ReconcileOnChainOwner applies a compare-and-swap after the verifier observes
+// an NFT transfer. It updates the wallet field and detaches the collectible
+// from the former profile by returning its host to the @relayer service user.
+func (s *StarGiftClaimStore) ReconcileOnChainOwner(ctx context.Context, uniqueGiftID int64, giftAddress, previousWallet, wallet string) (bool, error) {
+	if s == nil || s.db == nil || uniqueGiftID <= 0 || strings.TrimSpace(giftAddress) == "" ||
+		strings.TrimSpace(previousWallet) == "" || strings.TrimSpace(wallet) == "" || previousWallet == wallet {
+		return false, domain.ErrStarGiftInvalid
+	}
+	result, err := s.db.Exec(ctx, `UPDATE unique_star_gifts u
+SET owner_address=$4,host_peer_type='user',host_peer_id=$5,updated_at=now()
+FROM peer_star_gifts p
+WHERE u.id=$1 AND u.gift_address=$2 AND u.owner_address=$3 AND NOT u.burned
+  AND p.id=u.source_saved_gift_id AND p.lifecycle_status='exported'`,
+		uniqueGiftID, giftAddress, previousWallet, wallet, domain.GiftRelayerUserID)
+	if err != nil {
+		return false, fmt.Errorf("reconcile on-chain star gift owner: %w", err)
+	}
+	return result.RowsAffected() == 1, nil
+}
+
 func (s *StarGiftClaimStore) CreateChallenge(ctx context.Context, userID, uniqueGiftID int64, now time.Time, ttl time.Duration) (domain.StarGiftClaimChallenge, error) {
 	if s == nil || s.db == nil || userID <= 0 || uniqueGiftID <= 0 || ttl <= 0 {
 		return domain.StarGiftClaimChallenge{}, domain.ErrStarGiftInvalid

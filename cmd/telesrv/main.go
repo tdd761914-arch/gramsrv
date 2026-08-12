@@ -1144,6 +1144,7 @@ func run(logger *zap.Logger) error {
 			return fmt.Errorf("init gift claim Mini App: %w", err)
 		}
 		defer giftClaimService.Close()
+		go giftClaimService.RunOwnershipSync(ctx)
 		logger.Info("TON Proof gift claim enabled", zap.String("url", cfg.StarGiftClaimPublicBaseURL), zap.String("bot", "@claim"))
 	}
 	// Passkey:凭据持久化走 postgres;一次性挑战走进程内内存(短 TTL,与 QR 登录 token
