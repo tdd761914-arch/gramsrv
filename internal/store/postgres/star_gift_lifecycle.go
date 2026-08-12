@@ -1183,7 +1183,12 @@ func lockOwnedUniqueStarGift(ctx context.Context, tx pgx.Tx, actorUserID int64, 
 	if err != nil {
 		return domain.SavedStarGift{}, domain.UniqueStarGift{}, err
 	}
-	if !found || unique.Burned || unique.OwnerAddress != "" || unique.Owner != saved.Owner {
+	// Either on-chain address is sufficient evidence that MTProto ownership is
+	// no longer authoritative. Normally export writes both fields and marks the
+	// saved row exported atomically; checking gift_address as well keeps direct
+	// payments.transferStarGift callers fail-closed if a projection is repaired
+	// or only partially synchronized.
+	if !found || unique.Burned || unique.OwnerAddress != "" || unique.GiftAddress != "" || unique.Owner != saved.Owner {
 		return domain.SavedStarGift{}, domain.UniqueStarGift{}, domain.ErrStarGiftTransferUnavailable
 	}
 	return saved, unique, nil

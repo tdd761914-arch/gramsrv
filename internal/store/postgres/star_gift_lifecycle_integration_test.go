@@ -806,6 +806,24 @@ can_resell_at,drop_original_details_stars,can_craft_at FROM peer_star_gifts WHER
 	}); !errors.Is(err, domain.ErrStarGiftTransferUnavailable) {
 		t.Fatalf("transfer accepted exported gift: %v", err)
 	}
+	// A non-empty item address alone must also fail closed if a repair leaves
+	// the other export projections temporarily live.
+	if _, err := pool.Exec(ctx, `UPDATE peer_star_gifts SET lifecycle_status='active' WHERE id=$1`, transferred.Saved.ID); err != nil {
+		t.Fatalf("stage addressed transfer guard: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE unique_star_gifts SET owner_peer_type='user',owner_peer_id=$2,owner_address='' WHERE id=$1`,
+		transferred.Unique.ID, owner.ID); err != nil {
+		t.Fatalf("stage addressed unique guard: %v", err)
+	}
+	if _, err := lifecycle.TransferStarGift(ctx, domain.StarGiftTransferRequest{
+		ActorUserID: owner.ID,
+		Ref:         withdrawalReq.Ref,
+		To:          domain.Peer{Type: domain.PeerTypeUser, ID: buyer.ID},
+		CommandKey:  "transfer-addressed-" + suffix,
+		Date:        now + 154,
+	}); !errors.Is(err, domain.ErrStarGiftTransferUnavailable) {
+		t.Fatalf("transfer accepted gift_address-only collectible: %v", err)
+	}
 
 	// Auction winner reservation is consumed; the unreachable lower bid is
 	// refunded atomically. Award delivery is durable and includes gift_num.
