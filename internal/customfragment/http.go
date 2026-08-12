@@ -82,6 +82,8 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.serveLanding(w)
 	case r.Method == http.MethodGet && r.URL.Path == "/custom-fragment/tonconnect-manifest.json":
 		s.serveManifest(w)
+	case r.Method == http.MethodGet && r.URL.Path == "/custom-fragment/collection.json":
+		s.serveCollectionMetadata(w)
 	case r.Method == http.MethodGet && r.URL.Path == "/custom-fragment/icon.svg":
 		serveIcon(w)
 	case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/custom-fragment/metadata/gift/"):
@@ -137,9 +139,19 @@ func (s *Service) serveManifest(w http.ResponseWriter) {
 	})
 }
 
+func (s *Service) serveCollectionMetadata(w http.ResponseWriter) {
+	w.Header().Set("Cache-Control", "public, max-age=3600")
+	writeJSON(w, http.StatusOK, map[string]any{
+		"name":         s.collectionName,
+		"description":  "Unique collectible gifts exported from InvGram/Gramsrv to TON mainnet.",
+		"image":        s.publicBaseURL + "/custom-fragment/icon.svg",
+		"external_url": s.publicBaseURL + "/custom-fragment",
+	})
+}
+
 func (s *Service) serveLanding(w http.ResponseWriter) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_, _ = fmt.Fprintf(w, `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>CustomFragment</title><style>body{font:16px/1.5 system-ui;background:#0b1220;color:#eef5ff;max-width:680px;margin:12vh auto;padding:24px}code{overflow-wrap:anywhere;color:#76c4ff}</style><h1>%s CustomFragment</h1><p>Self-hosted TON mainnet withdrawal for unique Gramsrv gifts. Open the private withdrawal URL returned by <code>payments.getStarGiftWithdrawalUrl</code>.</p><p>Collection: <code>%s</code></p><p>Signing public key: <code>%s</code></p>`, template.HTMLEscapeString(s.appName), s.collection.StringRaw(), s.PublicKeyHex())
+	_, _ = fmt.Fprintf(w, `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>CustomFragment</title><style>body{font:16px/1.5 system-ui;background:#0b1220;color:#eef5ff;max-width:680px;margin:12vh auto;padding:24px}code{overflow-wrap:anywhere;color:#76c4ff}</style><h1>%s</h1><p>Self-hosted TON mainnet withdrawal for unique Gramsrv gifts. Open the private withdrawal URL returned by <code>payments.getStarGiftWithdrawalUrl</code>.</p><p>Collection: <code>%s</code></p><p>Signing public key: <code>%s</code></p>`, template.HTMLEscapeString(s.collectionName), s.collection.StringRaw(), s.PublicKeyHex())
 }
 
 func (s *Service) serveGiftMetadata(w http.ResponseWriter, r *http.Request) {

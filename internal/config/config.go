@@ -124,6 +124,7 @@ type Config struct {
 	CustomFragmentEnabled             bool
 	CustomFragmentSigningKeyFile      string
 	CustomFragmentGiftCollection      string
+	CustomFragmentCollectionName      string
 	CustomFragmentMintAmountNanoton   int64
 	CustomFragmentSubwalletID         int
 	CustomFragmentAuthorizationTTL    time.Duration
@@ -762,6 +763,7 @@ func Load() (Config, error) {
 		CustomFragmentEnabled:                envBoolOr("TELESRV_CUSTOM_FRAGMENT_ENABLE", false),
 		CustomFragmentSigningKeyFile:         envAllowEmptyOr("TELESRV_CUSTOM_FRAGMENT_SIGNING_KEY_FILE", ""),
 		CustomFragmentGiftCollection:         envAllowEmptyOr("TELESRV_CUSTOM_FRAGMENT_GIFT_COLLECTION", ""),
+		CustomFragmentCollectionName:         envOr("TELESRV_CUSTOM_FRAGMENT_COLLECTION_NAME", "InvGram Gifts"),
 		CustomFragmentMintAmountNanoton:      envInt64Or("TELESRV_CUSTOM_FRAGMENT_MINT_AMOUNT_NANOTON", 80_000_000),
 		CustomFragmentSubwalletID:            envIntOr("TELESRV_CUSTOM_FRAGMENT_SUBWALLET_ID", 0x4752414d),
 		CustomFragmentAuthorizationTTL:       envDurationOr("TELESRV_CUSTOM_FRAGMENT_AUTHORIZATION_TTL", 5*time.Minute),
@@ -1043,6 +1045,9 @@ func validateCustomFragmentConfig(cfg Config) error {
 	}
 	if strings.TrimSpace(cfg.CustomFragmentSigningKeyFile) == "" || strings.TrimSpace(cfg.CustomFragmentGiftCollection) == "" {
 		return fmt.Errorf("TELESRV_CUSTOM_FRAGMENT_SIGNING_KEY_FILE and TELESRV_CUSTOM_FRAGMENT_GIFT_COLLECTION are required")
+	}
+	if name := strings.TrimSpace(cfg.CustomFragmentCollectionName); name == "" || len(name) > 80 {
+		return fmt.Errorf("TELESRV_CUSTOM_FRAGMENT_COLLECTION_NAME must be 1..80 bytes")
 	}
 	if cfg.CustomFragmentMintAmountNanoton < 40_000_000 || cfg.CustomFragmentMintAmountNanoton > 2_000_000_000 {
 		return fmt.Errorf("TELESRV_CUSTOM_FRAGMENT_MINT_AMOUNT_NANOTON must be 40000000..2000000000")

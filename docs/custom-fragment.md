@@ -29,6 +29,9 @@ Deploy `CustomFragmentItem`, then deploy `CustomFragmentCollection` with:
 
 Deployment is intentionally an operator action: telesrv will never deploy a
 mainnet contract or generate/replace the mint authority key automatically.
+The included `deploy-mainnet` Acton script deploys the collection from the
+global `customfragment-deployer` wallet and takes the authority seed only from
+`CUSTOM_FRAGMENT_SIGNING_SEED`.
 
 ## Server configuration
 
@@ -48,5 +51,6 @@ Public routes:
 - `/custom-fragment` — service and collection information;
 - `/gift-withdrawal/{token}` — private mint page returned by the TL method;
 - `/custom-fragment/tonconnect-manifest.json` — TON Connect manifest;
+- `/custom-fragment/collection.json` — TEP-64 metadata for **InvGram Gifts**;
 - `/custom-fragment/metadata/gift/{slug}.json` — TEP-64 metadata;
 - `/custom-fragment/media/gift/{slug}.svg` — deterministic gift artwork.

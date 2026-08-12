@@ -1106,6 +1106,7 @@ func run(logger *zap.Logger) error {
 			PublicBaseURL: cfg.PublicBaseURL, AppName: cfg.PublicAppName,
 			SigningKeyFile:      cfg.CustomFragmentSigningKeyFile,
 			GiftCollection:      cfg.CustomFragmentGiftCollection,
+			CollectionName:      cfg.CustomFragmentCollectionName,
 			MintAmountNanoton:   cfg.CustomFragmentMintAmountNanoton,
 			SubwalletID:         uint32(cfg.CustomFragmentSubwalletID),
 			AuthorizationTTL:    cfg.CustomFragmentAuthorizationTTL,

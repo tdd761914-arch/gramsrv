@@ -14,3 +14,11 @@ acton build
 acton test
 acton wrapper
 ```
+
+Mainnet deployment uses the `customfragment-deployer` Acton wallet and reads
+the mint-authority seed from `CUSTOM_FRAGMENT_SIGNING_SEED`; the seed is never
+stored in contract data or printed:
+
+```sh
+CUSTOM_FRAGMENT_SIGNING_SEED=0x... acton run deploy-mainnet
+```

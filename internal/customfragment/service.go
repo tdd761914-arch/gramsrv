@@ -47,6 +47,7 @@ type Config struct {
 	SigningKeyFile      string
 	SigningKey          ed25519.PrivateKey // tests and in-process tooling only
 	GiftCollection      string
+	CollectionName      string
 	MintAmountNanoton   int64
 	SubwalletID         uint32
 	AuthorizationTTL    time.Duration
@@ -67,17 +68,18 @@ type Verifier interface {
 }
 
 type Service struct {
-	publicBaseURL string
-	appName       string
-	privateKey    ed25519.PrivateKey
-	publicKey     ed25519.PublicKey
-	collection    *address.Address
-	mintAmount    int64
-	subwalletID   uint32
-	authTTL       time.Duration
-	ledger        GiftLedger
-	verifier      Verifier
-	logger        *zap.Logger
+	publicBaseURL  string
+	appName        string
+	privateKey     ed25519.PrivateKey
+	publicKey      ed25519.PublicKey
+	collection     *address.Address
+	collectionName string
+	mintAmount     int64
+	subwalletID    uint32
+	authTTL        time.Duration
+	ledger         GiftLedger
+	verifier       Verifier
+	logger         *zap.Logger
 }
 
 type MintIntent struct {
@@ -150,10 +152,17 @@ func New(cfg Config, ledger GiftLedger, verifier Verifier, logger *zap.Logger) (
 	if appName == "" {
 		appName = "Gramsrv"
 	}
+	collectionName := strings.TrimSpace(cfg.CollectionName)
+	if collectionName == "" {
+		collectionName = "InvGram Gifts"
+	}
+	if len(collectionName) > 80 {
+		return nil, fmt.Errorf("CustomFragment collection name is too long")
+	}
 	publicKey := privateKey.Public().(ed25519.PublicKey)
 	return &Service{
 		publicBaseURL: strings.TrimRight(base.String(), "/"), appName: appName,
-		privateKey: privateKey, publicKey: publicKey, collection: collection,
+		privateKey: privateKey, publicKey: publicKey, collection: collection, collectionName: collectionName,
 		mintAmount: mintAmount, subwalletID: subwalletID, authTTL: authTTL,
 		ledger: ledger, verifier: verifier, logger: logger,
 	}, nil

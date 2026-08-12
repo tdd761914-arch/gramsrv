@@ -19,6 +19,9 @@ depends = []
 
 [test]
 
+[scripts]
+deploy-mainnet = "acton script scripts/deploy-mainnet.tolk --net mainnet --explorer tonviewer"
+
 [fmt]
 width = 100
 ignore = []
