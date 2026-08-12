@@ -1234,8 +1234,6 @@ func TestPublishStarGiftCollectiblesRejectsUnsafeClientPreviewPool(t *testing.T)
 		}
 	}
 	tests := map[string]func(*PublishStarGiftCollectiblesRequest){
-		"single model":    func(req *PublishStarGiftCollectiblesRequest) { req.Models = req.Models[:1] },
-		"single pattern":  func(req *PublishStarGiftCollectiblesRequest) { req.Patterns = req.Patterns[:1] },
 		"single backdrop": func(req *PublishStarGiftCollectiblesRequest) { req.Backdrops = req.Backdrops[:1] },
 		"duplicate backdrop id": func(req *PublishStarGiftCollectiblesRequest) {
 			req.Backdrops[1].BackdropID = req.Backdrops[0].BackdropID
@@ -1250,6 +1248,27 @@ func TestPublishStarGiftCollectiblesRejectsUnsafeClientPreviewPool(t *testing.T)
 				t.Fatalf("err=%v, want ErrStarGiftCollectibleInvalid", err)
 			}
 		})
+	}
+}
+
+func TestPublishStarGiftCollectiblesAllowsDeterministicModelAndPattern(t *testing.T) {
+	req := PublishStarGiftCollectiblesRequest{
+		CommandMeta: CommandMeta{CommandID: "singleton-pool", Actor: "ops", Reason: "deterministic pool", DryRun: true},
+		GiftID:      11, UpgradeStars: 1, SupplyTotal: 100, SlugPrefix: "owl",
+		Models: []StarGiftCollectibleAnimationUpload{
+			{Name: "Owl Jumping Rope", RarityPermille: 1000, FileName: "owl-model.tgs", Data: []byte("model")},
+		},
+		Patterns: []StarGiftCollectibleAnimationUpload{
+			{Name: "Owl", RarityPermille: 1000, FileName: "owl-pattern.tgs", Data: []byte("pattern")},
+		},
+		Backdrops: []StarGiftCollectibleBackdropInput{
+			{Name: "Black", BackdropID: 1, RarityPermille: 500},
+			{Name: "Light Gray", BackdropID: 2, RarityPermille: 500},
+		},
+	}
+	svc := NewService(Dependencies{Commands: newMemoryCommandRepo(), Gifts: &fakeGiftsService{}, Now: fixedNow})
+	if _, err := svc.PublishStarGiftCollectibles(context.Background(), req); err != nil {
+		t.Fatalf("singleton collectible pool: %v", err)
 	}
 }
 
@@ -1907,7 +1926,7 @@ func TestRevokeCollectibleUsernameChecksExpectedOwner(t *testing.T) {
 	}
 	if _, err := svc.RevokeCollectibleUsername(ctx, RevokeCollectibleUsernameRequest{
 		CommandMeta: CommandMeta{CommandID: "wrong-owner-refund", Actor: "bot", Reason: "refund"},
-		Username: "durov", ExpectedOwnerUserID: 1002,
+		Username:    "durov", ExpectedOwnerUserID: 1002,
 	}); err == nil || !strings.Contains(err.Error(), CodeCollectibleNotOwned) {
 		t.Fatalf("wrong-owner revoke err=%v, want %s", err, CodeCollectibleNotOwned)
 	}

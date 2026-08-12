@@ -1009,9 +1009,9 @@ func ValidateStarGiftCollectibleWrite(write StarGiftCollectibleWrite) error {
 }
 
 // validateStarGiftUpgradePreviewPool protects the official-client animation contract. The
-// preview response includes the target attribute plus the published selectable pool; TDesktop
-// deduplicates models and patterns by document identity and needs a non-target item in every
-// category before its spinner can transition to the finished state.
+// preview response includes the target attribute plus the published selectable pool. A pool may
+// intentionally contain one deterministic model or pattern; when it contains several entries,
+// every entry must still have its own document identity so clients do not deduplicate the pool.
 func validateStarGiftUpgradePreviewPool(write StarGiftCollectibleWrite, requireStoredAsset bool) error {
 	validateAnimated := func(kind StarGiftCollectibleAttributeKind, attributes []StarGiftCollectibleAttribute) error {
 		selectable := 0
@@ -1028,11 +1028,11 @@ func validateStarGiftUpgradePreviewPool(write StarGiftCollectibleWrite, requireS
 				documents[attribute.Document.ID] = struct{}{}
 			}
 		}
-		if selectable < 2 {
-			return fmt.Errorf("%w: %s preview requires at least two selectable attributes", ErrStarGiftCollectibleInvalid, kind)
+		if selectable < 1 {
+			return fmt.Errorf("%w: %s preview requires a selectable attribute", ErrStarGiftCollectibleInvalid, kind)
 		}
-		if requireStoredAsset && len(documents) < 2 {
-			return fmt.Errorf("%w: %s preview requires at least two distinct documents", ErrStarGiftCollectibleInvalid, kind)
+		if requireStoredAsset && len(documents) != selectable {
+			return fmt.Errorf("%w: %s preview attributes require distinct documents", ErrStarGiftCollectibleInvalid, kind)
 		}
 		return nil
 	}
