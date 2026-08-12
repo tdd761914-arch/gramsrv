@@ -57,6 +57,8 @@ get fun `test customfragment: signed gift mint deploys a standard nft`() {
     expect(data.itemIndex).toEqual(42);
     expect(data.ownerAddress!).toEqual(owner.address);
     expect(data.collectionAddress).toEqual(collection.address);
+    val fullContent = collection.getNftContent(data.itemIndex, data.content!);
+    expect(fullContent.hash()).toEqual(data.content!.hash());
 }
 
 get fun `test customfragment: authorization is bound to its wallet`() {

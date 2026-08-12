@@ -91,6 +91,14 @@ get fun get_nft_address_by_index(itemIndex: int): address {
     return calculateItemState(itemIndex, contract.getAddress(), storage.itemCode).calculateAddress();
 }
 
+/// Returns the complete TEP-64 content for an item. Gramsrv stores a complete
+/// off-chain metadata cell in every item, so the collection must return that
+/// cell unchanged. Wallets and indexers call this TEP-62 getter after
+/// `get_nft_data`; omitting it makes an otherwise valid NFT appear empty.
+get fun get_nft_content(_itemIndex: int, individualContent: cell): cell {
+    return individualContent;
+}
+
 get fun royalty_params(): RoyaltyParams {
     val storage = lazy CollectionStorage.fromCell(contract.getData());
     return storage.royalty.load();

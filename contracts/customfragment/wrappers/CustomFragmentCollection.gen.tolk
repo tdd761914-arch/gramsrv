@@ -104,6 +104,10 @@ fun CustomFragmentCollection.getNftAddressByIndex(self, itemIndex: int): address
     return net.runGetMethod(self.address, "get_nft_address_by_index", [itemIndex]);
 }
 
+fun CustomFragmentCollection.getNftContent(self, itemIndex: int, individualContent: cell): cell {
+    return net.runGetMethod(self.address, "get_nft_content", [itemIndex, individualContent]);
+}
+
 fun CustomFragmentCollection.royaltyParams(self): RoyaltyParams {
     return net.runGetMethod(self.address, "royalty_params");
 }

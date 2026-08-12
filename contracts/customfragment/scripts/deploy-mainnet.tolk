@@ -45,7 +45,10 @@ fun main() {
 
     println("Mint authority public key: 0x{:x}", authority.publicKey);
     println("CustomFragment collection address: {}", collection.address);
-    val result = collection.deploy(deployer.address, { value: ton("0.12"), bounce: false });
+    // Keep the initial reserve small: mint messages pay their own execution and
+    // forward the remaining value to the item. Anyone can top the collection
+    // up later with an empty internal message if storage rent ever requires it.
+    val result = collection.deploy(deployer.address, { value: ton("0.03"), bounce: false });
     result.waitForFirstTransaction();
     println("CustomFragment collection deployed: {}", collection.address);
 }
