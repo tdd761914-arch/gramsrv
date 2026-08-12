@@ -192,8 +192,13 @@ func newHandler(cfg Config, logger *zap.Logger) (http.Handler, error) {
 	mux.HandleFunc("POST /gift-withdrawal/{requestID}", h.completeStarGiftWithdrawal)
 	if cfg.CustomFragment != nil {
 		mux.Handle("GET /custom-fragment", cfg.CustomFragment)
-		mux.Handle("GET /custom-fragment/", cfg.CustomFragment)
-		mux.Handle("POST /custom-fragment/", cfg.CustomFragment)
+		mux.Handle("GET /custom-fragment/{$}", cfg.CustomFragment)
+		mux.Handle("GET /custom-fragment/tonconnect-manifest.json", cfg.CustomFragment)
+		mux.Handle("GET /custom-fragment/collection.json", cfg.CustomFragment)
+		mux.Handle("GET /custom-fragment/icon.svg", cfg.CustomFragment)
+		mux.Handle("GET /custom-fragment/metadata/gift/{slug}", cfg.CustomFragment)
+		mux.Handle("GET /custom-fragment/media/gift/{slug}", cfg.CustomFragment)
+		mux.Handle("POST /custom-fragment/api/gifts/{requestID}/{action}", cfg.CustomFragment)
 	}
 	if cfg.ModerationAppeals != nil {
 		mux.HandleFunc("GET /appeal/{token}", h.moderationAppeal)

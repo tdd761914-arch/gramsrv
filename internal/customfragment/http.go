@@ -78,7 +78,7 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	switch {
-	case r.Method == http.MethodGet && r.URL.Path == "/custom-fragment":
+	case r.Method == http.MethodGet && (r.URL.Path == "/custom-fragment" || r.URL.Path == "/custom-fragment/"):
 		s.serveLanding(w)
 	case r.Method == http.MethodGet && r.URL.Path == "/custom-fragment/tonconnect-manifest.json":
 		s.serveManifest(w)

@@ -21,6 +21,44 @@ func newTestHandler(t *testing.T, resolver StickerSetResolver, publicBaseURL str
 	return h
 }
 
+type customFragmentStub struct{}
+
+func (customFragmentStub) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (customFragmentStub) ServeWithdrawalPage(w http.ResponseWriter, _ *http.Request, _ string) {
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func TestCustomFragmentRoutesDoNotConflictWithUsernameLinks(t *testing.T) {
+	h, err := NewHandler(Config{
+		StickerSets:    fakeResolver{},
+		PublicBaseURL:  "https://links.example.test",
+		CustomFragment: customFragmentStub{},
+	})
+	if err != nil {
+		t.Fatalf("NewHandler: %v", err)
+	}
+	for _, target := range []string{
+		"/custom-fragment",
+		"/custom-fragment/",
+		"/custom-fragment/tonconnect-manifest.json",
+		"/custom-fragment/metadata/gift/Gift-1.json",
+	} {
+		rr := httptest.NewRecorder()
+		h.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, target, nil))
+		if rr.Code != http.StatusNoContent {
+			t.Fatalf("GET %s status = %d, want %d", target, rr.Code, http.StatusNoContent)
+		}
+	}
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/custom-fragment/api/gifts/request-1/intent", strings.NewReader(`{}`)))
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("POST CustomFragment status = %d, want %d", rr.Code, http.StatusNoContent)
+	}
+}
+
 func newTestHandlerWithPublicPeers(
 	t *testing.T,
 	resolver StickerSetResolver,
