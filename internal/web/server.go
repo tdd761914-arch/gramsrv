@@ -35,6 +35,7 @@ type Config struct {
 	Photos            ProfilePhotoResolver
 	UniqueGifts       UniqueStarGiftResolver
 	GiftWithdrawals   StarGiftWithdrawalResolver
+	CustomFragment    CustomFragmentHandler
 	ModerationAppeals ModerationAppealResolver
 	// TelegramLogin is the optional OIDC/Login HTTP adapter. Public Web owns
 	// the listener so discovery/auth/token and public links share the exact
@@ -73,6 +74,11 @@ type UniqueStarGiftResolver interface {
 type StarGiftWithdrawalResolver interface {
 	ResolveWithdrawal(ctx context.Context, providerRequestID string) (domain.StarGiftWithdrawal, bool, error)
 	CompleteWithdrawal(ctx context.Context, providerRequestID string, date int) (domain.StarGiftWithdrawal, error)
+}
+
+type CustomFragmentHandler interface {
+	http.Handler
+	ServeWithdrawalPage(w http.ResponseWriter, r *http.Request, requestID string)
 }
 
 type ModerationAppealResolver interface {
@@ -165,6 +171,7 @@ func newHandler(cfg Config, logger *zap.Logger) (http.Handler, error) {
 		photos:          cfg.Photos,
 		uniqueGifts:     cfg.UniqueGifts,
 		giftWithdrawals: cfg.GiftWithdrawals,
+		customFragment:  cfg.CustomFragment,
 		appeals:         cfg.ModerationAppeals,
 		publicBaseURL:   cfg.PublicBaseURL,
 		appLinks:        appLinks,
@@ -183,6 +190,11 @@ func newHandler(cfg Config, logger *zap.Logger) (http.Handler, error) {
 	mux.HandleFunc("GET /nft/{slug}/{$}", h.uniqueGift)
 	mux.HandleFunc("GET /gift-withdrawal/{requestID}", h.starGiftWithdrawal)
 	mux.HandleFunc("POST /gift-withdrawal/{requestID}", h.completeStarGiftWithdrawal)
+	if cfg.CustomFragment != nil {
+		mux.Handle("GET /custom-fragment", cfg.CustomFragment)
+		mux.Handle("GET /custom-fragment/", cfg.CustomFragment)
+		mux.Handle("POST /custom-fragment/", cfg.CustomFragment)
+	}
 	if cfg.ModerationAppeals != nil {
 		mux.HandleFunc("GET /appeal/{token}", h.moderationAppeal)
 		mux.HandleFunc("POST /appeal/{token}", h.moderationAppeal)
@@ -211,6 +223,7 @@ type handler struct {
 	photos          ProfilePhotoResolver
 	uniqueGifts     UniqueStarGiftResolver
 	giftWithdrawals StarGiftWithdrawalResolver
+	customFragment  CustomFragmentHandler
 	appeals         ModerationAppealResolver
 	publicBaseURL   string
 	appLinks        links.AppLinkBuilder
@@ -372,10 +385,18 @@ body{font:16px/1.5 system-ui,sans-serif;background:#f4f6f8;color:#17212b;margin:
 </main></body></html>`))
 
 func (h *handler) starGiftWithdrawal(w http.ResponseWriter, r *http.Request) {
+	if h.customFragment != nil {
+		h.customFragment.ServeWithdrawalPage(w, r, r.PathValue("requestID"))
+		return
+	}
 	h.renderStarGiftWithdrawal(w, r, false)
 }
 
 func (h *handler) completeStarGiftWithdrawal(w http.ResponseWriter, r *http.Request) {
+	if h.customFragment != nil {
+		http.Error(w, "use the CustomFragment TON Connect flow", http.StatusMethodNotAllowed)
+		return
+	}
 	h.renderStarGiftWithdrawal(w, r, true)
 }
 
@@ -1045,7 +1066,11 @@ func publicWebAppURL(webBaseURL, legacyURL string) string {
 
 func publicSecurityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Security-Policy", "default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; script-src 'unsafe-inline'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'")
+		if strings.HasPrefix(r.URL.Path, "/custom-fragment") || strings.HasPrefix(r.URL.Path, "/gift-withdrawal/") {
+			w.Header().Set("Content-Security-Policy", "default-src 'none'; img-src 'self' data: https:; style-src 'unsafe-inline'; script-src 'unsafe-inline' https://unpkg.com; connect-src 'self' https: wss:; base-uri 'none'; form-action 'self'; frame-ancestors 'none'")
+		} else {
+			w.Header().Set("Content-Security-Policy", "default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; script-src 'unsafe-inline'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'")
+		}
 		w.Header().Set("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=(), usb=()")
 		w.Header().Set("Referrer-Policy", "no-referrer")
 		w.Header().Set("X-Content-Type-Options", "nosniff")

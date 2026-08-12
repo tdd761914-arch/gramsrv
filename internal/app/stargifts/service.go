@@ -821,6 +821,22 @@ func (s *Service) CompleteWithdrawal(ctx context.Context, providerRequestID stri
 	return s.lifecycle.CompleteStarGiftWithdrawal(ctx, providerRequestID, date)
 }
 
+// CompleteWithdrawalOnChain is deliberately separate from the legacy local
+// completion path. CustomFragment calls it only after independently reading the
+// NFT owner, index and collection from TON mainnet.
+func (s *Service) CompleteWithdrawalOnChain(ctx context.Context, providerRequestID, ownerAddress, giftAddress string, date int) (domain.StarGiftWithdrawal, error) {
+	if s == nil || s.lifecycle == nil {
+		return domain.StarGiftWithdrawal{}, domain.ErrStarGiftWithdrawalUnavailable
+	}
+	completer, ok := s.lifecycle.(interface {
+		CompleteStarGiftWithdrawalOnChain(context.Context, string, string, string, int) (domain.StarGiftWithdrawal, error)
+	})
+	if !ok {
+		return domain.StarGiftWithdrawal{}, domain.ErrStarGiftWithdrawalUnavailable
+	}
+	return completer.CompleteStarGiftWithdrawalOnChain(ctx, providerRequestID, ownerAddress, giftAddress, date)
+}
+
 func (s *Service) TonBalance(ctx context.Context, userID int64) (int64, error) {
 	if s == nil || s.lifecycle == nil {
 		return 0, nil

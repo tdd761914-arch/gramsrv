@@ -4,6 +4,7 @@ package config
 import (
 	"bufio"
 	"fmt"
+	"math"
 	"net/netip"
 	"net/url"
 	"os"
@@ -117,6 +118,16 @@ type Config struct {
 	// 生产应只监听 loopback，并由 nginx 将 /<username>、/addstickers/、/addemoji/、
 	// /addlist/ 与 hash-only /appeal/ 路由反代到该地址。
 	PublicLinkWebAddr string
+	// CustomFragment enables mainnet withdrawal of unique Gramsrv gifts. The
+	// mint authority key is file-backed; the server never exposes it to the Web
+	// App. Username minting is intentionally out of scope.
+	CustomFragmentEnabled             bool
+	CustomFragmentSigningKeyFile      string
+	CustomFragmentGiftCollection      string
+	CustomFragmentMintAmountNanoton   int64
+	CustomFragmentSubwalletID         int
+	CustomFragmentAuthorizationTTL    time.Duration
+	CustomFragmentLiteserverConfigURL string
 	// TelegramLoginEnabled mounts the self-hosted Telegram Login/OIDC provider
 	// on PublicLinkWebAddr. Secrets are file-backed so they are not exposed in
 	// process listings or accidentally copied into tracked .env templates.
@@ -748,6 +759,13 @@ func Load() (Config, error) {
 		PublicWebBaseURL:                     publicWebBaseURL,
 		PublicAppName:                        publicAppName,
 		PublicLinkWebAddr:                    envAllowEmptyOr("TELESRV_PUBLIC_LINK_WEB_ADDR", ""),
+		CustomFragmentEnabled:                envBoolOr("TELESRV_CUSTOM_FRAGMENT_ENABLE", false),
+		CustomFragmentSigningKeyFile:         envAllowEmptyOr("TELESRV_CUSTOM_FRAGMENT_SIGNING_KEY_FILE", ""),
+		CustomFragmentGiftCollection:         envAllowEmptyOr("TELESRV_CUSTOM_FRAGMENT_GIFT_COLLECTION", ""),
+		CustomFragmentMintAmountNanoton:      envInt64Or("TELESRV_CUSTOM_FRAGMENT_MINT_AMOUNT_NANOTON", 80_000_000),
+		CustomFragmentSubwalletID:            envIntOr("TELESRV_CUSTOM_FRAGMENT_SUBWALLET_ID", 0x4752414d),
+		CustomFragmentAuthorizationTTL:       envDurationOr("TELESRV_CUSTOM_FRAGMENT_AUTHORIZATION_TTL", 5*time.Minute),
+		CustomFragmentLiteserverConfigURL:    envOr("TELESRV_CUSTOM_FRAGMENT_LITESERVER_CONFIG_URL", "https://ton-blockchain.github.io/global.config.json"),
 		TelegramLoginEnabled:                 envBoolOr("TELESRV_TELEGRAM_LOGIN_ENABLE", false),
 		TelegramLoginIssuer:                  strings.TrimSuffix(envOr("TELESRV_TELEGRAM_LOGIN_ISSUER", publicBaseURL), "/"),
 		TelegramLoginAllowHTTP:               envBoolOr("TELESRV_TELEGRAM_LOGIN_ALLOW_HTTP", false),
@@ -1001,6 +1019,9 @@ func Load() (Config, error) {
 	if err := validateTelegramLoginConfig(cfg); err != nil {
 		return Config{}, err
 	}
+	if err := validateCustomFragmentConfig(cfg); err != nil {
+		return Config{}, err
+	}
 	if err := validateBlobStorageConfig(cfg); err != nil {
 		return Config{}, err
 	}
@@ -1011,6 +1032,32 @@ func Load() (Config, error) {
 		return Config{}, fmt.Errorf("TELESRV_UPDATE_REQUEST_TIMEOUT must be greater than zero and at most 30s")
 	}
 	return cfg, nil
+}
+
+func validateCustomFragmentConfig(cfg Config) error {
+	if !cfg.CustomFragmentEnabled {
+		return nil
+	}
+	if strings.TrimSpace(cfg.PublicLinkWebAddr) == "" {
+		return fmt.Errorf("TELESRV_PUBLIC_LINK_WEB_ADDR is required when CustomFragment is enabled")
+	}
+	if strings.TrimSpace(cfg.CustomFragmentSigningKeyFile) == "" || strings.TrimSpace(cfg.CustomFragmentGiftCollection) == "" {
+		return fmt.Errorf("TELESRV_CUSTOM_FRAGMENT_SIGNING_KEY_FILE and TELESRV_CUSTOM_FRAGMENT_GIFT_COLLECTION are required")
+	}
+	if cfg.CustomFragmentMintAmountNanoton < 40_000_000 || cfg.CustomFragmentMintAmountNanoton > 2_000_000_000 {
+		return fmt.Errorf("TELESRV_CUSTOM_FRAGMENT_MINT_AMOUNT_NANOTON must be 40000000..2000000000")
+	}
+	if cfg.CustomFragmentSubwalletID < 0 || uint64(cfg.CustomFragmentSubwalletID) > uint64(math.MaxUint32) {
+		return fmt.Errorf("TELESRV_CUSTOM_FRAGMENT_SUBWALLET_ID must be uint32")
+	}
+	if cfg.CustomFragmentAuthorizationTTL < time.Minute || cfg.CustomFragmentAuthorizationTTL > 15*time.Minute {
+		return fmt.Errorf("TELESRV_CUSTOM_FRAGMENT_AUTHORIZATION_TTL must be 1m..15m")
+	}
+	configURL, err := url.Parse(strings.TrimSpace(cfg.CustomFragmentLiteserverConfigURL))
+	if err != nil || configURL.Scheme != "https" || configURL.Host == "" {
+		return fmt.Errorf("TELESRV_CUSTOM_FRAGMENT_LITESERVER_CONFIG_URL must be an absolute HTTPS URL")
+	}
+	return nil
 }
 
 func validateBlobStorageConfig(cfg Config) error {

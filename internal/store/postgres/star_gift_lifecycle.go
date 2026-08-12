@@ -1495,6 +1495,23 @@ func (s *StarGiftLifecycleStore) resolveStarGiftWithdrawalByUniqueID(ctx context
 }
 
 func (s *StarGiftLifecycleStore) CompleteStarGiftWithdrawal(ctx context.Context, providerRequestID string, date int) (domain.StarGiftWithdrawal, error) {
+	return s.completeStarGiftWithdrawal(ctx, providerRequestID, date, "", "")
+}
+
+// CompleteStarGiftWithdrawalOnChain atomically retires the gramsrv gift after
+// CustomFragment has verified the initialized NFT against a mainnet lite server.
+// Addresses are persisted in raw TEP-2 form so all clients compare one canonical
+// representation regardless of bounce/testnet display flags.
+func (s *StarGiftLifecycleStore) CompleteStarGiftWithdrawalOnChain(ctx context.Context, providerRequestID, ownerAddress, giftAddress string, date int) (domain.StarGiftWithdrawal, error) {
+	ownerAddress = strings.TrimSpace(ownerAddress)
+	giftAddress = strings.TrimSpace(giftAddress)
+	if len(ownerAddress) < 10 || len(ownerAddress) > 128 || len(giftAddress) < 10 || len(giftAddress) > 128 {
+		return domain.StarGiftWithdrawal{}, domain.ErrStarGiftWithdrawalUnavailable
+	}
+	return s.completeStarGiftWithdrawal(ctx, providerRequestID, date, ownerAddress, giftAddress)
+}
+
+func (s *StarGiftLifecycleStore) completeStarGiftWithdrawal(ctx context.Context, providerRequestID string, date int, ownerAddress, giftAddress string) (domain.StarGiftWithdrawal, error) {
 	providerRequestID = strings.TrimSpace(providerRequestID)
 	if providerRequestID == "" || len(providerRequestID) > 256 || date <= 0 {
 		return domain.StarGiftWithdrawal{}, domain.ErrStarGiftWithdrawalUnavailable
@@ -1536,9 +1553,13 @@ WHERE provider_request_id=$1 FOR UPDATE`, providerRequestID).Scan(&uniqueID, &ow
 		if err := removeSavedGiftFromCollections(ctx, tx, saved.Owner, saved.ID); err != nil {
 			return err
 		}
-		ownerAddress := "telesrv-owner:" + providerRequestID
-		requestHash := sha256.Sum256([]byte(providerRequestID))
-		giftAddress := fmt.Sprintf("telesrv-gift:%s:%x", unique.Slug, requestHash[:8])
+		if ownerAddress == "" {
+			ownerAddress = "telesrv-owner:" + providerRequestID
+		}
+		if giftAddress == "" {
+			requestHash := sha256.Sum256([]byte(providerRequestID))
+			giftAddress = fmt.Sprintf("telesrv-gift:%s:%x", unique.Slug, requestHash[:8])
+		}
 		if _, err := tx.Exec(ctx, `UPDATE unique_star_gifts SET owner_peer_type=NULL,owner_peer_id=NULL,
 owner_address=$2,gift_address=$3,craft_chance_permille=0,updated_at=now() WHERE id=$1`, uniqueID, ownerAddress, giftAddress); err != nil {
 			return err

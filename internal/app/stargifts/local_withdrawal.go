@@ -12,11 +12,11 @@ import (
 
 const localWithdrawalTTL = 15 * time.Minute
 
-// LocalWithdrawalProvider implements the TON/export UX entirely inside
-// telesrv. It mints an unguessable, short-lived bearer URL; no external
-// blockchain, Fragment endpoint, wallet or network RPC is contacted.
+// LocalWithdrawalProvider mints the unguessable, short-lived bearer URL used
+// by either the legacy local completion page or CustomFragment.
 type LocalWithdrawalProvider struct {
 	publicBaseURL string
+	name          string
 }
 
 func NewLocalWithdrawalProvider(publicBaseURL string) (*LocalWithdrawalProvider, error) {
@@ -26,10 +26,24 @@ func NewLocalWithdrawalProvider(publicBaseURL string) (*LocalWithdrawalProvider,
 		(parsed.Scheme != "http" && parsed.Scheme != "https") {
 		return nil, fmt.Errorf("invalid local star gift withdrawal base URL")
 	}
-	return &LocalWithdrawalProvider{publicBaseURL: publicBaseURL}, nil
+	return &LocalWithdrawalProvider{publicBaseURL: publicBaseURL, name: "telesrv-local"}, nil
 }
 
-func (p *LocalWithdrawalProvider) Name() string { return "telesrv-local" }
+func NewCustomFragmentWithdrawalProvider(publicBaseURL string) (*LocalWithdrawalProvider, error) {
+	provider, err := NewLocalWithdrawalProvider(publicBaseURL)
+	if err != nil {
+		return nil, err
+	}
+	provider.name = "customfragment-ton-mainnet"
+	return provider, nil
+}
+
+func (p *LocalWithdrawalProvider) Name() string {
+	if p == nil || p.name == "" {
+		return "telesrv-local"
+	}
+	return p.name
+}
 
 func (p *LocalWithdrawalProvider) CreateWithdrawal(_ context.Context, _ StarGiftWithdrawalProviderRequest) (StarGiftWithdrawalProviderResult, error) {
 	if p == nil || p.publicBaseURL == "" {

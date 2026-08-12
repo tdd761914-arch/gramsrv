@@ -67,6 +67,7 @@ import (
 	"telesrv/internal/botapi"
 	"telesrv/internal/branding"
 	"telesrv/internal/config"
+	"telesrv/internal/customfragment"
 	"telesrv/internal/domain"
 	"telesrv/internal/mtprotoedge"
 	obsmetrics "telesrv/internal/observability/metrics"
@@ -1089,13 +1090,35 @@ func run(logger *zap.Logger) error {
 			TONProceedsPermille:   cfg.StarGiftTONProceedsPermille,
 		}))
 	starGiftWithdrawalProvider, err := stargifts.NewLocalWithdrawalProvider(cfg.PublicBaseURL)
+	if cfg.CustomFragmentEnabled {
+		starGiftWithdrawalProvider, err = stargifts.NewCustomFragmentWithdrawalProvider(cfg.PublicBaseURL)
+	}
 	if err != nil {
-		return fmt.Errorf("init local star gift withdrawal provider: %w", err)
+		return fmt.Errorf("init star gift withdrawal provider: %w", err)
 	}
 	giftsService := stargifts.NewService(starGiftStore, blobBackend, cfg.DC,
 		stargifts.WithUpgradeStore(starGiftUpgradeStore),
 		stargifts.WithLifecycleStore(starGiftLifecycleStore),
 		stargifts.WithWithdrawalProvider(starGiftWithdrawalProvider))
+	var customFragmentService *customfragment.Service
+	if cfg.CustomFragmentEnabled {
+		customFragmentService, err = customfragment.New(customfragment.Config{
+			PublicBaseURL: cfg.PublicBaseURL, AppName: cfg.PublicAppName,
+			SigningKeyFile:      cfg.CustomFragmentSigningKeyFile,
+			GiftCollection:      cfg.CustomFragmentGiftCollection,
+			MintAmountNanoton:   cfg.CustomFragmentMintAmountNanoton,
+			SubwalletID:         uint32(cfg.CustomFragmentSubwalletID),
+			AuthorizationTTL:    cfg.CustomFragmentAuthorizationTTL,
+			LiteserverConfigURL: cfg.CustomFragmentLiteserverConfigURL,
+		}, giftsService, nil, logger.Named("custom-fragment"))
+		if err != nil {
+			return fmt.Errorf("init CustomFragment: %w", err)
+		}
+		defer customFragmentService.Close()
+		logger.Info("CustomFragment TON mainnet gift withdrawal enabled",
+			zap.String("collection", cfg.CustomFragmentGiftCollection),
+			zap.String("signing_public_key", customFragmentService.PublicKeyHex()))
+	}
 	// Passkey:凭据持久化走 postgres;一次性挑战走进程内内存(短 TTL,与 QR 登录 token
 	// 同属进程内一次性凭据,不跨实例)。
 	passkeyStore := postgres.NewPasskeyStore(pool)
@@ -1578,6 +1601,7 @@ func run(logger *zap.Logger) error {
 		Photos:            filesService,
 		UniqueGifts:       giftsService,
 		GiftWithdrawals:   giftsService,
+		CustomFragment:    customFragmentService,
 		ModerationAppeals: moderationService,
 		TelegramLogin:     telegramLoginHTTPHandler,
 	}, logger.Named("public-web")); err != nil {
