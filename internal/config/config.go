@@ -121,7 +121,11 @@ type Config struct {
 	// CustomFragment enables mainnet withdrawal of unique Gramsrv gifts. The
 	// mint authority key is file-backed; the server never exposes it to the Web
 	// App. Username minting is intentionally out of scope.
-	CustomFragmentEnabled             bool
+	CustomFragmentEnabled bool
+	// CustomFragmentPublicBaseURL may use a host distinct from PublicBaseURL so
+	// native clients open withdrawal capabilities in a browser instead of
+	// interpreting their path as an internal username link.
+	CustomFragmentPublicBaseURL       string
 	CustomFragmentSigningKeyFile      string
 	CustomFragmentGiftCollection      string
 	CustomFragmentCollectionName      string
@@ -638,6 +642,10 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, fmt.Errorf("TELESRV_PUBLIC_BASE_URL: %w", err)
 	}
+	customFragmentPublicBaseURL, err := links.ValidateBaseURL(envOr("TELESRV_CUSTOM_FRAGMENT_PUBLIC_BASE_URL", publicBaseURL))
+	if err != nil {
+		return Config{}, fmt.Errorf("TELESRV_CUSTOM_FRAGMENT_PUBLIC_BASE_URL: %w", err)
+	}
 	brandConfig := branding.DefaultConfig()
 	brandConfig.ProductName = envOr("TELESRV_BRAND_PRODUCT_NAME", brandConfig.ProductName)
 	brandConfig.ProductUsername = envOr("TELESRV_BRAND_PRODUCT_USERNAME", brandConfig.ProductUsername)
@@ -761,6 +769,7 @@ func Load() (Config, error) {
 		PublicAppName:                        publicAppName,
 		PublicLinkWebAddr:                    envAllowEmptyOr("TELESRV_PUBLIC_LINK_WEB_ADDR", ""),
 		CustomFragmentEnabled:                envBoolOr("TELESRV_CUSTOM_FRAGMENT_ENABLE", false),
+		CustomFragmentPublicBaseURL:          customFragmentPublicBaseURL,
 		CustomFragmentSigningKeyFile:         envAllowEmptyOr("TELESRV_CUSTOM_FRAGMENT_SIGNING_KEY_FILE", ""),
 		CustomFragmentGiftCollection:         envAllowEmptyOr("TELESRV_CUSTOM_FRAGMENT_GIFT_COLLECTION", ""),
 		CustomFragmentCollectionName:         envOr("TELESRV_CUSTOM_FRAGMENT_COLLECTION_NAME", "InvGram Gifts"),
@@ -1042,6 +1051,10 @@ func validateCustomFragmentConfig(cfg Config) error {
 	}
 	if strings.TrimSpace(cfg.PublicLinkWebAddr) == "" {
 		return fmt.Errorf("TELESRV_PUBLIC_LINK_WEB_ADDR is required when CustomFragment is enabled")
+	}
+	fragmentURL, err := url.Parse(strings.TrimSpace(cfg.CustomFragmentPublicBaseURL))
+	if err != nil || fragmentURL.Scheme != "https" || fragmentURL.Host == "" {
+		return fmt.Errorf("TELESRV_CUSTOM_FRAGMENT_PUBLIC_BASE_URL must be an absolute HTTPS URL")
 	}
 	if strings.TrimSpace(cfg.CustomFragmentSigningKeyFile) == "" || strings.TrimSpace(cfg.CustomFragmentGiftCollection) == "" {
 		return fmt.Errorf("TELESRV_CUSTOM_FRAGMENT_SIGNING_KEY_FILE and TELESRV_CUSTOM_FRAGMENT_GIFT_COLLECTION are required")

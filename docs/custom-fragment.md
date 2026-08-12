@@ -40,6 +40,11 @@ enable the public Web listener. The collection address must be a TON basechain
 mainnet address. Keep the signing key outside the repository with restrictive
 filesystem permissions.
 
+Set `TELESRV_CUSTOM_FRAGMENT_PUBLIC_BASE_URL` to a dedicated HTTPS host served
+by the same Web listener. It must differ from the native client's internal link
+host; otherwise Android may parse `/gift-withdrawal/{token}` as a username link
+instead of opening the browser.
+
 The browser sends a wallet-bound, five-minute authorization to TON Connect. The
 server does not accept the wallet callback as proof. It derives the expected NFT
 address with `get_nft_address_by_index`, reads `get_nft_data` through proof-

@@ -1091,7 +1091,7 @@ func run(logger *zap.Logger) error {
 		}))
 	starGiftWithdrawalProvider, err := stargifts.NewLocalWithdrawalProvider(cfg.PublicBaseURL)
 	if cfg.CustomFragmentEnabled {
-		starGiftWithdrawalProvider, err = stargifts.NewCustomFragmentWithdrawalProvider(cfg.PublicBaseURL)
+		starGiftWithdrawalProvider, err = stargifts.NewCustomFragmentWithdrawalProvider(cfg.CustomFragmentPublicBaseURL)
 	}
 	if err != nil {
 		return fmt.Errorf("init star gift withdrawal provider: %w", err)
