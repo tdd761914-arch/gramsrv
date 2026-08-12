@@ -10,12 +10,14 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"image"
 	"math"
 	"math/big"
 	"net/url"
 	"os"
 	"path"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/xssnick/tonutils-go/address"
@@ -23,6 +25,7 @@ import (
 	"go.uber.org/zap"
 
 	"telesrv/internal/domain"
+	"telesrv/internal/lottierender"
 )
 
 const (
@@ -52,7 +55,10 @@ type Config struct {
 	SubwalletID         uint32
 	AuthorizationTTL    time.Duration
 	LiteserverConfigURL string
+	ModelRenderer       ModelRenderFunc // tests or an alternate production renderer
 }
+
+type ModelRenderFunc func(data []byte, width, height int, position float64) (*image.NRGBA, error)
 
 type GiftLedger interface {
 	ResolveWithdrawal(ctx context.Context, providerRequestID string) (domain.StarGiftWithdrawal, bool, error)
@@ -79,6 +85,9 @@ type Service struct {
 	authTTL        time.Duration
 	ledger         GiftLedger
 	verifier       Verifier
+	renderModel    ModelRenderFunc
+	imageMu        sync.RWMutex
+	imageCache     map[string][]byte
 	logger         *zap.Logger
 }
 
@@ -148,6 +157,10 @@ func New(cfg Config, ledger GiftLedger, verifier Verifier, logger *zap.Logger) (
 	if logger == nil {
 		logger = zap.NewNop()
 	}
+	renderModel := cfg.ModelRenderer
+	if renderModel == nil {
+		renderModel = lottierender.Render
+	}
 	appName := strings.TrimSpace(cfg.AppName)
 	if appName == "" {
 		appName = "Gramsrv"
@@ -165,6 +178,7 @@ func New(cfg Config, ledger GiftLedger, verifier Verifier, logger *zap.Logger) (
 		privateKey: privateKey, publicKey: publicKey, collection: collection, collectionName: collectionName,
 		mintAmount: mintAmount, subwalletID: subwalletID, authTTL: authTTL,
 		ledger: ledger, verifier: verifier, logger: logger,
+		renderModel: renderModel, imageCache: make(map[string][]byte),
 	}, nil
 }
 

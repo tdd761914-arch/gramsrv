@@ -1,10 +1,17 @@
 package customfragment
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"html/template"
+	"image"
+	"image/color"
+	"image/draw"
+	"image/png"
+	"math"
 	"net/http"
 	"path"
 	"strconv"
@@ -15,6 +22,12 @@ import (
 
 	"telesrv/internal/domain"
 )
+
+const maxGiftImageCacheEntries = 128
+
+type collectibleModelAnimationResolver interface {
+	CollectibleAnimationJSON(ctx context.Context, giftID int64, kind domain.StarGiftCollectibleAttributeKind, attributeID int64) ([]byte, bool, error)
+}
 
 type withdrawalPage struct {
 	AppName      string
@@ -160,10 +173,6 @@ func (s *Service) serveGiftMetadata(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	title := strings.TrimSpace(gift.Title)
-	if title == "" {
-		title = "Gramsrv Gift"
-	}
 	attributes := []map[string]string{
 		{"trait_type": "Model", "value": gift.Model.Name},
 		{"trait_type": "Pattern", "value": gift.Pattern.Name},
@@ -171,27 +180,102 @@ func (s *Service) serveGiftMetadata(w http.ResponseWriter, r *http.Request) {
 		{"trait_type": "Number", "value": strconv.Itoa(gift.Num)},
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"name":         fmt.Sprintf("%s #%d", title, gift.Num),
+		"name":         gift.Slug,
 		"description":  "A unique collectible gift exported from " + s.appName + " to TON mainnet.",
-		"image":        s.publicBaseURL + path.Join("/custom-fragment/media/gift/", gift.Slug+".svg"),
+		"image":        s.publicBaseURL + path.Join("/custom-fragment/media/gift/", gift.Slug+".png"),
 		"external_url": s.publicBaseURL + path.Join("/nft/", gift.Slug),
 		"attributes":   attributes,
 	})
 }
 
 func (s *Service) serveGiftImage(w http.ResponseWriter, r *http.Request) {
-	slug := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/custom-fragment/media/gift/"), ".svg")
+	slug := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/custom-fragment/media/gift/"), ".png")
 	gift, ok := s.resolvePublicGift(w, r, slug)
 	if !ok {
 		return
 	}
-	title := template.HTMLEscapeString(gift.Title)
-	if title == "" {
-		title = "Gramsrv Gift"
+	data, err := s.giftImagePNG(r.Context(), gift)
+	if err != nil {
+		s.logger.Warn("render CustomFragment gift image", zap.String("slug", gift.Slug), zap.Error(err))
+		http.Error(w, "gift image is temporarily unavailable", http.StatusServiceUnavailable)
+		return
 	}
-	w.Header().Set("Content-Type", "image/svg+xml")
-	w.Header().Set("Cache-Control", "public, max-age=3600")
-	_, _ = fmt.Fprintf(w, `<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024"><defs><radialGradient id="b"><stop stop-color="#51b8ff"/><stop offset=".52" stop-color="#635cff"/><stop offset="1" stop-color="#10192d"/></radialGradient></defs><rect width="1024" height="1024" rx="96" fill="url(#b)"/><circle cx="512" cy="430" r="230" fill="#fff" opacity=".13"/><text x="512" y="510" text-anchor="middle" font-size="230">🎁</text><text x="512" y="770" text-anchor="middle" fill="white" font-family="system-ui,sans-serif" font-size="64" font-weight="700">%s</text><text x="512" y="850" text-anchor="middle" fill="#d9e7ff" font-family="system-ui,sans-serif" font-size="46">#%d · GRAMSRV</text></svg>`, title, gift.Num)
+	w.Header().Set("Content-Type", "image/png")
+	w.Header().Set("Cache-Control", "public, max-age=86400, immutable")
+	w.Header().Set("Content-Length", strconv.Itoa(len(data)))
+	_, _ = w.Write(data)
+}
+
+func (s *Service) giftImagePNG(ctx context.Context, gift domain.UniqueStarGift) ([]byte, error) {
+	s.imageMu.RLock()
+	cached := append([]byte(nil), s.imageCache[gift.Slug]...)
+	s.imageMu.RUnlock()
+	if len(cached) > 0 {
+		return cached, nil
+	}
+	resolver, ok := s.ledger.(collectibleModelAnimationResolver)
+	if !ok || gift.Model.ID <= 0 {
+		return nil, errors.New("collectible model animation resolver is unavailable")
+	}
+	modelJSON, found, err := resolver.CollectibleAnimationJSON(ctx, gift.GiftID, domain.StarGiftCollectibleModel, gift.Model.ID)
+	if err != nil || !found || len(modelJSON) == 0 {
+		return nil, fmt.Errorf("load selected model animation: %w", err)
+	}
+	const canvasSize, modelSize = 1024, 896
+	model, err := s.renderModel(modelJSON, modelSize, modelSize, 0.22)
+	if err != nil {
+		return nil, fmt.Errorf("render selected model: %w", err)
+	}
+	canvas := renderBackdrop(canvasSize, gift.Backdrop.CenterColor, gift.Backdrop.EdgeColor)
+	// Deliberately composite only the selected model. The collectible pattern is
+	// a Telegram profile-card effect and is excluded from the NFT poster.
+	draw.Draw(canvas, image.Rect(64, 48, 64+modelSize, 48+modelSize), model, image.Point{}, draw.Over)
+	var encoded bytes.Buffer
+	encoder := png.Encoder{CompressionLevel: png.BestSpeed}
+	if err := encoder.Encode(&encoded, canvas); err != nil {
+		return nil, fmt.Errorf("encode gift poster: %w", err)
+	}
+	data := encoded.Bytes()
+	s.imageMu.Lock()
+	if len(s.imageCache) >= maxGiftImageCacheEntries {
+		clear(s.imageCache)
+	}
+	s.imageCache[gift.Slug] = append([]byte(nil), data...)
+	s.imageMu.Unlock()
+	return data, nil
+}
+
+func renderBackdrop(size, centerRGB, edgeRGB int) *image.NRGBA {
+	if size <= 0 {
+		size = 1024
+	}
+	center, edge := rgbColor(centerRGB), rgbColor(edgeRGB)
+	out := image.NewNRGBA(image.Rect(0, 0, size, size))
+	cx, cy := float64(size)/2, float64(size)*0.42
+	maxDistance := math.Hypot(math.Max(cx, float64(size)-cx), math.Max(cy, float64(size)-cy))
+	for y := 0; y < size; y++ {
+		for x := 0; x < size; x++ {
+			t := math.Min(1, math.Hypot(float64(x)-cx, float64(y)-cy)/maxDistance)
+			t = t * t * (3 - 2*t)
+			offset := y*out.Stride + x*4
+			out.Pix[offset] = mixChannel(center.R, edge.R, t)
+			out.Pix[offset+1] = mixChannel(center.G, edge.G, t)
+			out.Pix[offset+2] = mixChannel(center.B, edge.B, t)
+			out.Pix[offset+3] = 255
+		}
+	}
+	return out
+}
+
+func rgbColor(value int) color.NRGBA {
+	if value < 0 || value > 0xffffff {
+		value = 0x15233d
+	}
+	return color.NRGBA{R: uint8(value >> 16), G: uint8(value >> 8), B: uint8(value), A: 255}
+}
+
+func mixChannel(from, to uint8, ratio float64) uint8 {
+	return uint8(math.Round(float64(from)*(1-ratio) + float64(to)*ratio))
 }
 
 func (s *Service) resolvePublicGift(w http.ResponseWriter, r *http.Request, slug string) (domain.UniqueStarGift, bool) {

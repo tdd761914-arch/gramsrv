@@ -1,9 +1,13 @@
 package customfragment
 
 import (
+	"bytes"
 	"context"
 	"crypto/ed25519"
 	"encoding/base64"
+	"image"
+	"image/color"
+	"image/png"
 	"math/big"
 	"net/http"
 	"net/http/httptest"
@@ -18,10 +22,12 @@ import (
 )
 
 type fakeLedger struct {
-	withdrawal domain.StarGiftWithdrawal
-	completed  bool
-	owner      string
-	item       string
+	withdrawal           domain.StarGiftWithdrawal
+	completed            bool
+	owner                string
+	item                 string
+	animationKind        domain.StarGiftCollectibleAttributeKind
+	animationAttributeID int64
 }
 
 func (f *fakeLedger) ResolveWithdrawal(_ context.Context, requestID string) (domain.StarGiftWithdrawal, bool, error) {
@@ -44,6 +50,11 @@ func (f *fakeLedger) CompleteWithdrawalOnChain(_ context.Context, requestID, own
 
 func (f *fakeLedger) UniqueBySlug(_ context.Context, slug string) (domain.UniqueStarGift, bool, error) {
 	return f.withdrawal.Gift, slug == f.withdrawal.Gift.Slug, nil
+}
+
+func (f *fakeLedger) CollectibleAnimationJSON(_ context.Context, _ int64, kind domain.StarGiftCollectibleAttributeKind, attributeID int64) ([]byte, bool, error) {
+	f.animationKind, f.animationAttributeID = kind, attributeID
+	return []byte(`{"v":"5.5.2"}`), true, nil
 }
 
 type fakeVerifier struct {
@@ -78,15 +89,20 @@ func testService(t *testing.T, now time.Time) (*Service, *fakeLedger, *fakeVerif
 	ledger := &fakeLedger{withdrawal: domain.StarGiftWithdrawal{
 		ProviderRequestID: "withdraw-token", ExpiresAt: int(now.Add(10 * time.Minute).Unix()), Status: "pending",
 		Gift: domain.UniqueStarGift{ID: 42, GiftID: 7, Title: "Crystal Star", Slug: "CrystalStar-42", Num: 42,
-			Model:    domain.StarGiftCollectibleAttribute{Name: "Azure"},
-			Pattern:  domain.StarGiftCollectibleAttribute{Name: "Comet"},
-			Backdrop: domain.StarGiftCollectibleAttribute{Name: "Midnight"}},
+			Model:    domain.StarGiftCollectibleAttribute{ID: 11, Name: "Azure"},
+			Pattern:  domain.StarGiftCollectibleAttribute{ID: 12, Name: "Comet"},
+			Backdrop: domain.StarGiftCollectibleAttribute{Name: "Midnight", CenterColor: 0x336699, EdgeColor: 0x112233}},
 	}}
 	verifier := &fakeVerifier{item: item.StringRaw()}
 	service, err := New(Config{
 		PublicBaseURL: "https://grams.example", AppName: "Gramsrv", SigningKey: privateKey,
 		GiftCollection: collection.String(), MintAmountNanoton: 80_000_000,
 		SubwalletID: defaultSubwalletID, AuthorizationTTL: 5 * time.Minute,
+		ModelRenderer: func(_ []byte, width, height int, _ float64) (*image.NRGBA, error) {
+			frame := image.NewNRGBA(image.Rect(0, 0, width, height))
+			frame.SetNRGBA(width/2, height/2, color.NRGBA{R: 255, A: 255})
+			return frame, nil
+		},
 	}, ledger, verifier, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -194,8 +210,27 @@ func TestHTTPPageAndMetadata(t *testing.T) {
 
 	metadata := httptest.NewRecorder()
 	service.ServeHTTP(metadata, httptest.NewRequest(http.MethodGet, "/custom-fragment/metadata/gift/CrystalStar-42.json", nil))
-	if metadata.Code != http.StatusOK || !strings.Contains(metadata.Body.String(), `"name":"Crystal Star #42"`) || !strings.Contains(metadata.Body.String(), `"trait_type":"Model"`) {
+	if metadata.Code != http.StatusOK || !strings.Contains(metadata.Body.String(), `"name":"CrystalStar-42"`) ||
+		!strings.Contains(metadata.Body.String(), `"image":"https://grams.example/custom-fragment/media/gift/CrystalStar-42.png"`) ||
+		!strings.Contains(metadata.Body.String(), `"trait_type":"Model"`) {
 		t.Fatalf("metadata status=%d body=%q", metadata.Code, metadata.Body.String())
+	}
+
+	poster := httptest.NewRecorder()
+	service.ServeHTTP(poster, httptest.NewRequest(http.MethodGet, "/custom-fragment/media/gift/CrystalStar-42.png", nil))
+	if poster.Code != http.StatusOK || poster.Header().Get("Content-Type") != "image/png" {
+		t.Fatalf("poster status=%d content-type=%q body=%q", poster.Code, poster.Header().Get("Content-Type"), poster.Body.String())
+	}
+	decoded, err := png.Decode(bytes.NewReader(poster.Body.Bytes()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ledger.animationKind != domain.StarGiftCollectibleModel || ledger.animationAttributeID != 11 {
+		t.Fatalf("poster requested %s/%d; pattern must not be rendered", ledger.animationKind, ledger.animationAttributeID)
+	}
+	r, g, b, a := decoded.At(512, 496).RGBA()
+	if r != 0xffff || g != 0 || b != 0 || a != 0xffff {
+		t.Fatalf("poster model pixel = %04x/%04x/%04x/%04x", r, g, b, a)
 	}
 }
 
