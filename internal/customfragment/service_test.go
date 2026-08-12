@@ -102,7 +102,9 @@ func TestIntentBuildsTolkCompatibleSignedPayload(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if intent.Network != mainnetChain || intent.Amount != "80000000" || intent.WalletAddress != owner.StringRaw() || intent.ItemIndex != "42" {
+	if intent.Network != mainnetChain || intent.CollectionAddress != service.collection.String() ||
+		strings.Contains(intent.CollectionAddress, ":") || intent.Amount != "80000000" ||
+		intent.WalletAddress != owner.StringRaw() || intent.ItemIndex != "42" {
 		t.Fatalf("unexpected intent: %+v", intent)
 	}
 	boc, err := base64.StdEncoding.DecodeString(intent.Payload)

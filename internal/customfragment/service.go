@@ -230,7 +230,7 @@ func (s *Service) Intent(ctx context.Context, requestID, walletAddress string, n
 		EndCell()
 
 	return MintIntent{
-		Network: mainnetChain, CollectionAddress: s.collection.StringRaw(),
+		Network: mainnetChain, CollectionAddress: s.collection.String(),
 		Amount:  fmt.Sprintf("%d", s.mintAmount),
 		Payload: base64.StdEncoding.EncodeToString(body.ToBOC()), ValidUntil: validUntil,
 		ItemIndex: itemIndex.String(), WalletAddress: owner.StringRaw(),
