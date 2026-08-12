@@ -1796,6 +1796,16 @@ func savedStarGiftUserIDs(viewerUserID int64, gifts []domain.SavedStarGift) []in
 	seen := make(map[int64]struct{}, len(gifts))
 	ids := make([]int64, 0, len(gifts))
 	for _, g := range gifts {
+		if g.Unique != nil {
+			for _, peer := range []domain.Peer{g.Unique.Owner, g.Unique.Host} {
+				if peer.Type == domain.PeerTypeUser && peer.ID > 0 {
+					if _, ok := seen[peer.ID]; !ok {
+						seen[peer.ID] = struct{}{}
+						ids = append(ids, peer.ID)
+					}
+				}
+			}
+		}
 		if g.FromUserID == 0 || !savedStarGiftOriginalDetailsVisible(viewerUserID, g) {
 			continue
 		}

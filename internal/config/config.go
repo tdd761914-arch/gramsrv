@@ -133,6 +133,15 @@ type Config struct {
 	CustomFragmentSubwalletID         int
 	CustomFragmentAuthorizationTTL    time.Duration
 	CustomFragmentLiteserverConfigURL string
+	// StarGiftClaim exposes the @claim Mini App. Telegram init data binds the
+	// Gramsrv profile; TON Proof plus a lite-server read binds the current wallet
+	// and NFT owner before host_id is updated.
+	StarGiftClaimEnabled       bool
+	StarGiftClaimPublicBaseURL string
+	StarGiftClaimBotToken      string
+	StarGiftClaimChallengeTTL  time.Duration
+	StarGiftClaimProofTTL      time.Duration
+	StarGiftClaimInitDataTTL   time.Duration
 	// TelegramLoginEnabled mounts the self-hosted Telegram Login/OIDC provider
 	// on PublicLinkWebAddr. Secrets are file-backed so they are not exposed in
 	// process listings or accidentally copied into tracked .env templates.
@@ -646,6 +655,10 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, fmt.Errorf("TELESRV_CUSTOM_FRAGMENT_PUBLIC_BASE_URL: %w", err)
 	}
+	starGiftClaimPublicBaseURL, err := links.ValidateBaseURL(envOr("TELESRV_STAR_GIFT_CLAIM_PUBLIC_BASE_URL", publicBaseURL))
+	if err != nil {
+		return Config{}, fmt.Errorf("TELESRV_STAR_GIFT_CLAIM_PUBLIC_BASE_URL: %w", err)
+	}
 	brandConfig := branding.DefaultConfig()
 	brandConfig.ProductName = envOr("TELESRV_BRAND_PRODUCT_NAME", brandConfig.ProductName)
 	brandConfig.ProductUsername = envOr("TELESRV_BRAND_PRODUCT_USERNAME", brandConfig.ProductUsername)
@@ -777,6 +790,12 @@ func Load() (Config, error) {
 		CustomFragmentSubwalletID:            envIntOr("TELESRV_CUSTOM_FRAGMENT_SUBWALLET_ID", 0x4752414d),
 		CustomFragmentAuthorizationTTL:       envDurationOr("TELESRV_CUSTOM_FRAGMENT_AUTHORIZATION_TTL", 5*time.Minute),
 		CustomFragmentLiteserverConfigURL:    envOr("TELESRV_CUSTOM_FRAGMENT_LITESERVER_CONFIG_URL", "https://ton-blockchain.github.io/global.config.json"),
+		StarGiftClaimEnabled:                 envBoolOr("TELESRV_STAR_GIFT_CLAIM_ENABLE", false),
+		StarGiftClaimPublicBaseURL:           starGiftClaimPublicBaseURL,
+		StarGiftClaimBotToken:                envAllowEmptyOr("TELESRV_STAR_GIFT_CLAIM_BOT_TOKEN", ""),
+		StarGiftClaimChallengeTTL:            envDurationOr("TELESRV_STAR_GIFT_CLAIM_CHALLENGE_TTL", 5*time.Minute),
+		StarGiftClaimProofTTL:                envDurationOr("TELESRV_STAR_GIFT_CLAIM_PROOF_TTL", 5*time.Minute),
+		StarGiftClaimInitDataTTL:             envDurationOr("TELESRV_STAR_GIFT_CLAIM_INIT_DATA_TTL", 15*time.Minute),
 		TelegramLoginEnabled:                 envBoolOr("TELESRV_TELEGRAM_LOGIN_ENABLE", false),
 		TelegramLoginIssuer:                  strings.TrimSuffix(envOr("TELESRV_TELEGRAM_LOGIN_ISSUER", publicBaseURL), "/"),
 		TelegramLoginAllowHTTP:               envBoolOr("TELESRV_TELEGRAM_LOGIN_ALLOW_HTTP", false),
@@ -1033,6 +1052,9 @@ func Load() (Config, error) {
 	if err := validateCustomFragmentConfig(cfg); err != nil {
 		return Config{}, err
 	}
+	if err := validateStarGiftClaimConfig(cfg); err != nil {
+		return Config{}, err
+	}
 	if err := validateBlobStorageConfig(cfg); err != nil {
 		return Config{}, err
 	}
@@ -1074,6 +1096,32 @@ func validateCustomFragmentConfig(cfg Config) error {
 	configURL, err := url.Parse(strings.TrimSpace(cfg.CustomFragmentLiteserverConfigURL))
 	if err != nil || configURL.Scheme != "https" || configURL.Host == "" {
 		return fmt.Errorf("TELESRV_CUSTOM_FRAGMENT_LITESERVER_CONFIG_URL must be an absolute HTTPS URL")
+	}
+	return nil
+}
+
+func validateStarGiftClaimConfig(cfg Config) error {
+	if !cfg.StarGiftClaimEnabled {
+		return nil
+	}
+	if !cfg.CustomFragmentEnabled {
+		return fmt.Errorf("TELESRV_STAR_GIFT_CLAIM_ENABLE requires CustomFragment")
+	}
+	if strings.TrimSpace(cfg.PublicLinkWebAddr) == "" {
+		return fmt.Errorf("TELESRV_PUBLIC_LINK_WEB_ADDR is required when gift claim is enabled")
+	}
+	claimURL, err := url.Parse(strings.TrimSpace(cfg.StarGiftClaimPublicBaseURL))
+	if err != nil || claimURL.Scheme != "https" || claimURL.Host == "" || claimURL.User != nil {
+		return fmt.Errorf("TELESRV_STAR_GIFT_CLAIM_PUBLIC_BASE_URL must be an absolute HTTPS URL")
+	}
+	botID, _, ok := domain.ParseBotToken(strings.TrimSpace(cfg.StarGiftClaimBotToken))
+	if !ok || botID != domain.GiftClaimBotUserID {
+		return fmt.Errorf("TELESRV_STAR_GIFT_CLAIM_BOT_TOKEN must be %d:<secret>", domain.GiftClaimBotUserID)
+	}
+	if cfg.StarGiftClaimChallengeTTL < time.Minute || cfg.StarGiftClaimChallengeTTL > 15*time.Minute ||
+		cfg.StarGiftClaimProofTTL < time.Minute || cfg.StarGiftClaimProofTTL > 15*time.Minute ||
+		cfg.StarGiftClaimInitDataTTL < time.Minute || cfg.StarGiftClaimInitDataTTL > 24*time.Hour {
+		return fmt.Errorf("TELESRV_STAR_GIFT_CLAIM_*_TTL is outside the supported range")
 	}
 	return nil
 }

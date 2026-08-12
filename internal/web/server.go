@@ -36,6 +36,7 @@ type Config struct {
 	UniqueGifts       UniqueStarGiftResolver
 	GiftWithdrawals   StarGiftWithdrawalResolver
 	CustomFragment    CustomFragmentHandler
+	GiftClaim         http.Handler
 	ModerationAppeals ModerationAppealResolver
 	// TelegramLogin is the optional OIDC/Login HTTP adapter. Public Web owns
 	// the listener so discovery/auth/token and public links share the exact
@@ -199,6 +200,14 @@ func newHandler(cfg Config, logger *zap.Logger) (http.Handler, error) {
 		mux.Handle("GET /custom-fragment/metadata/gift/{slug}", cfg.CustomFragment)
 		mux.Handle("GET /custom-fragment/media/gift/{slug}", cfg.CustomFragment)
 		mux.Handle("POST /custom-fragment/api/gifts/{requestID}/{action}", cfg.CustomFragment)
+	}
+	if cfg.GiftClaim != nil {
+		mux.Handle("GET /claim", cfg.GiftClaim)
+		mux.Handle("GET /claim/{$}", cfg.GiftClaim)
+		mux.Handle("GET /claim/tonconnect-manifest.json", cfg.GiftClaim)
+		mux.Handle("GET /claim/icon.svg", cfg.GiftClaim)
+		mux.Handle("POST /claim/api/challenge", cfg.GiftClaim)
+		mux.Handle("POST /claim/api/verify", cfg.GiftClaim)
 	}
 	if cfg.ModerationAppeals != nil {
 		mux.HandleFunc("GET /appeal/{token}", h.moderationAppeal)
@@ -1071,8 +1080,8 @@ func publicWebAppURL(webBaseURL, legacyURL string) string {
 
 func publicSecurityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasPrefix(r.URL.Path, "/custom-fragment") || strings.HasPrefix(r.URL.Path, "/gift-withdrawal/") {
-			w.Header().Set("Content-Security-Policy", "default-src 'none'; img-src 'self' data: https:; style-src 'unsafe-inline'; script-src 'unsafe-inline' https://unpkg.com; connect-src 'self' https: wss:; base-uri 'none'; form-action 'self'; frame-ancestors 'none'")
+		if strings.HasPrefix(r.URL.Path, "/custom-fragment") || strings.HasPrefix(r.URL.Path, "/gift-withdrawal/") || strings.HasPrefix(r.URL.Path, "/claim") {
+			w.Header().Set("Content-Security-Policy", "default-src 'none'; img-src 'self' data: https:; style-src 'unsafe-inline'; script-src 'unsafe-inline' https://unpkg.com https://telegram.org; connect-src 'self' https: wss:; base-uri 'none'; form-action 'self'; frame-ancestors 'none'")
 		} else {
 			w.Header().Set("Content-Security-Policy", "default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; script-src 'unsafe-inline'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'")
 		}

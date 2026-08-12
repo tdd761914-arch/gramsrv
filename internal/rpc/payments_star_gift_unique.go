@@ -393,6 +393,11 @@ func tgUniqueStarGift(unique domain.UniqueStarGift) *tg.StarGiftUnique {
 	}
 	if unique.OwnerAddress != "" {
 		out.SetOwnerAddress(unique.OwnerAddress)
+		// Telegram's TL flags are independent: expose the Gramsrv profile in
+		// owner_id and the actual on-chain holder in owner_address at once.
+		if host := tgPeer(unique.Host); host != nil {
+			out.SetOwnerID(host)
+		}
 	} else if owner := tgPeer(unique.Owner); owner != nil {
 		out.SetOwnerID(owner)
 	} else if unique.OwnerName != "" {

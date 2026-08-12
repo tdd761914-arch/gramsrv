@@ -69,6 +69,7 @@ import (
 	"telesrv/internal/config"
 	"telesrv/internal/customfragment"
 	"telesrv/internal/domain"
+	"telesrv/internal/giftclaim"
 	"telesrv/internal/mtprotoedge"
 	obsmetrics "telesrv/internal/observability/metrics"
 	"telesrv/internal/officialgifts"
@@ -1120,6 +1121,31 @@ func run(logger *zap.Logger) error {
 			zap.String("collection", cfg.CustomFragmentGiftCollection),
 			zap.String("signing_public_key", customFragmentService.PublicKeyHex()))
 	}
+	var giftClaimService *giftclaim.Service
+	if cfg.StarGiftClaimEnabled {
+		_, claimBotSecret, _ := domain.ParseBotToken(cfg.StarGiftClaimBotToken)
+		if _, err := pool.Exec(ctx, `UPDATE bots SET token_secret=$2,updated_at=now() WHERE bot_user_id=$1`, domain.GiftClaimBotUserID, claimBotSecret); err != nil {
+			return fmt.Errorf("configure @claim token: %w", err)
+		}
+		if _, err := botsService.SetBotMenuButton(ctx, domain.GiftClaimBotUserID, domain.BotMenuButton{
+			Type: domain.BotMenuButtonWebView, Text: "Claim NFT", URL: strings.TrimRight(cfg.StarGiftClaimPublicBaseURL, "/") + "/claim",
+		}); err != nil {
+			return fmt.Errorf("configure @claim Mini App: %w", err)
+		}
+		claimVerifier := customfragment.NewMainnetVerifier(cfg.CustomFragmentLiteserverConfigURL)
+		giftClaimService, err = giftclaim.New(giftclaim.Config{
+			PublicBaseURL: cfg.StarGiftClaimPublicBaseURL, BotToken: cfg.StarGiftClaimBotToken,
+			Collection: cfg.CustomFragmentGiftCollection, AppName: cfg.CustomFragmentCollectionName,
+			ChallengeTTL: cfg.StarGiftClaimChallengeTTL, ProofTTL: cfg.StarGiftClaimProofTTL,
+			InitDataTTL: cfg.StarGiftClaimInitDataTTL,
+		}, postgres.NewStarGiftClaimStore(pool), claimVerifier, logger.Named("gift-claim"))
+		if err != nil {
+			claimVerifier.Close()
+			return fmt.Errorf("init gift claim Mini App: %w", err)
+		}
+		defer giftClaimService.Close()
+		logger.Info("TON Proof gift claim enabled", zap.String("url", cfg.StarGiftClaimPublicBaseURL), zap.String("bot", "@claim"))
+	}
 	// Passkey:凭据持久化走 postgres;一次性挑战走进程内内存(短 TTL,与 QR 登录 token
 	// 同属进程内一次性凭据,不跨实例)。
 	passkeyStore := postgres.NewPasskeyStore(pool)
@@ -1603,6 +1629,7 @@ func run(logger *zap.Logger) error {
 		UniqueGifts:       giftsService,
 		GiftWithdrawals:   giftsService,
 		CustomFragment:    customFragmentService,
+		GiftClaim:         giftClaimService,
 		ModerationAppeals: moderationService,
 		TelegramLogin:     telegramLoginHTTPHandler,
 	}, logger.Named("public-web")); err != nil {

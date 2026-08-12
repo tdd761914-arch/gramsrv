@@ -499,14 +499,17 @@ func (s *StarGiftStore) ListByOwnerFiltered(ctx context.Context, filter domain.S
 	joins := `
 JOIN star_gift_catalog c ON c.gift_id = p.gift_id
 LEFT JOIN star_gift_collectible_revisions acr
-  ON acr.id = c.collectible_revision_id AND acr.status = 'published'`
-	conditions := []string{"p.owner_peer_type = $1", "p.owner_peer_id = $2", "p.lifecycle_status = 'active'"}
+  ON acr.id = c.collectible_revision_id AND acr.status = 'published'
+LEFT JOIN unique_star_gifts hosted ON hosted.id = p.unique_gift_id`
+	hosted := `(p.lifecycle_status='exported' AND hosted.owner_address<>'' AND NOT hosted.burned
+  AND hosted.host_peer_type=$1 AND hosted.host_peer_id=$2)`
+	conditions := []string{`((p.owner_peer_type=$1 AND p.owner_peer_id=$2 AND p.lifecycle_status='active') OR ` + hosted + `)`}
 	args := []any{string(owner.Type), owner.ID}
 	if filter.ExcludeUnsaved {
-		conditions = append(conditions, "NOT p.unsaved")
+		conditions = append(conditions, "("+hosted+" OR NOT p.unsaved)")
 	}
 	if filter.ExcludeSaved {
-		conditions = append(conditions, "p.unsaved")
+		conditions = append(conditions, "("+hosted+" OR p.unsaved)")
 	}
 	if filter.ExcludeUnique {
 		conditions = append(conditions, "p.unique_gift_id IS NULL")
@@ -564,10 +567,22 @@ WHERE ci.saved_gift_id = p.id AND ci.collection_id = $%d
 	args = append(args, limit+1)
 	limitPlaceholder := len(args)
 	rows, err := s.db.Query(ctx, `
-SELECT p.id, p.owner_peer_type, p.owner_peer_id, p.from_user_id, p.gift_id, p.catalog_revision_id,
-       p.msg_id, p.saved_id, p.gift_date, p.name_hidden, p.unsaved, p.converted, p.convert_stars, p.prepaid_upgrade_stars, p.prepaid_upgrade_hash, p.gift_num,
-       p.lifecycle_status, p.transfer_stars, p.can_export_at, p.can_transfer_at, p.can_resell_at,
-       p.drop_original_details_stars, p.can_craft_at,
+SELECT p.id,
+       CASE WHEN p.lifecycle_status='exported' THEN hosted.host_peer_type ELSE p.owner_peer_type END,
+       CASE WHEN p.lifecycle_status='exported' THEN hosted.host_peer_id ELSE p.owner_peer_id END,
+       p.from_user_id, p.gift_id, p.catalog_revision_id,
+       CASE WHEN p.lifecycle_status='exported' THEN 0 ELSE p.msg_id END,
+       CASE WHEN p.lifecycle_status='exported' THEN 0 ELSE p.saved_id END,
+       p.gift_date, p.name_hidden,
+       CASE WHEN p.lifecycle_status='exported' THEN false ELSE p.unsaved END,
+       p.converted, p.convert_stars, p.prepaid_upgrade_stars, p.prepaid_upgrade_hash, p.gift_num,
+       p.lifecycle_status,
+       CASE WHEN p.lifecycle_status='exported' THEN 0 ELSE p.transfer_stars END,
+       CASE WHEN p.lifecycle_status='exported' THEN 0 ELSE p.can_export_at END,
+       CASE WHEN p.lifecycle_status='exported' THEN 0 ELSE p.can_transfer_at END,
+       CASE WHEN p.lifecycle_status='exported' THEN 0 ELSE p.can_resell_at END,
+       CASE WHEN p.lifecycle_status='exported' THEN 0 ELSE p.drop_original_details_stars END,
+       CASE WHEN p.lifecycle_status='exported' THEN 0 ELSE p.can_craft_at END,
 	   p.message, p.message_entities::text, COALESCE(p.unique_gift_id, 0), p.upgrade_msg_id, p.pinned_order,
        COALESCE((SELECT array_agg(i.collection_id ORDER BY c.sort_order, i.collection_id)
                  FROM star_gift_collection_items i
@@ -799,7 +814,12 @@ func (s *StarGiftStore) CountByOwner(ctx context.Context, owner domain.Peer) (in
 		return 0, nil
 	}
 	var n int
-	if err := s.db.QueryRow(ctx, `SELECT COUNT(*) FROM peer_star_gifts WHERE owner_peer_type = $1 AND owner_peer_id = $2 AND lifecycle_status='active' AND NOT unsaved`, string(owner.Type), owner.ID).Scan(&n); err != nil {
+	if err := s.db.QueryRow(ctx, `SELECT COUNT(*)
+FROM peer_star_gifts p
+LEFT JOIN unique_star_gifts u ON u.id=p.unique_gift_id
+WHERE (p.owner_peer_type=$1 AND p.owner_peer_id=$2 AND p.lifecycle_status='active' AND NOT p.unsaved)
+   OR (p.lifecycle_status='exported' AND u.owner_address<>'' AND NOT u.burned
+       AND u.host_peer_type=$1 AND u.host_peer_id=$2)`, string(owner.Type), owner.ID).Scan(&n); err != nil {
 		return 0, fmt.Errorf("count star gifts: %w", err)
 	}
 	return n, nil

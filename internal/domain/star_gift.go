@@ -242,6 +242,30 @@ type UniqueStarGift struct {
 	CreatedAt               time.Time
 }
 
+// StarGiftClaimChallenge binds a short-lived, single-use TON Proof payload to
+// one Gramsrv user and one already exported collectible.
+type StarGiftClaimChallenge struct {
+	Payload   string
+	UserID    int64
+	Unique    UniqueStarGift
+	ExpiresAt int
+}
+
+type StarGiftOnChainClaim struct {
+	Payload       string
+	UserID        int64
+	UniqueGiftID  int64
+	WalletAddress string
+	GiftAddress   string
+	ClaimedAt     int
+}
+
+type StarGiftOnChainClaimResult struct {
+	Gift            UniqueStarGift
+	PreviousWallet  string
+	ProfileUsername string
+}
+
 // CollectibleEmojiStatus projects an immutable unique gift into the complete
 // status shape consumed by Telegram clients.  Ownership/lifecycle validation
 // is intentionally performed by the caller because it depends on the actor;

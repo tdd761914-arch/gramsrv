@@ -1561,7 +1561,8 @@ WHERE provider_request_id=$1 FOR UPDATE`, providerRequestID).Scan(&uniqueID, &ow
 			giftAddress = fmt.Sprintf("telesrv-gift:%s:%x", unique.Slug, requestHash[:8])
 		}
 		if _, err := tx.Exec(ctx, `UPDATE unique_star_gifts SET owner_peer_type=NULL,owner_peer_id=NULL,
-owner_address=$2,gift_address=$3,craft_chance_permille=0,updated_at=now() WHERE id=$1`, uniqueID, ownerAddress, giftAddress); err != nil {
+owner_address=$2,gift_address=$3,host_peer_type='user',host_peer_id=$4,
+craft_chance_permille=0,updated_at=now() WHERE id=$1`, uniqueID, ownerAddress, giftAddress, domain.GiftRelayerUserID); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(ctx, `UPDATE peer_star_gifts SET lifecycle_status='exported',unsaved=true,pinned_order=0,can_craft_at=0 WHERE id=$1`, saved.ID); err != nil {
@@ -1573,6 +1574,7 @@ owner_address=$2,gift_address=$3,craft_chance_permille=0,updated_at=now() WHERE 
 		unique.Owner = domain.Peer{}
 		unique.OwnerAddress = ownerAddress
 		unique.GiftAddress = giftAddress
+		unique.Host = domain.Peer{Type: domain.PeerTypeUser, ID: domain.GiftRelayerUserID}
 		unique.CraftChancePermille = 0
 		if _, err := s.retireUserStarGiftMessagesTx(ctx, tx, saved, unique, date); err != nil {
 			return err

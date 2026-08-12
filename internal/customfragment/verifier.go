@@ -11,6 +11,7 @@ import (
 	"github.com/xssnick/tonutils-go/liteclient"
 	"github.com/xssnick/tonutils-go/ton"
 	"github.com/xssnick/tonutils-go/ton/nft"
+	tonwallet "github.com/xssnick/tonutils-go/ton/wallet"
 )
 
 const defaultMainnetConfigURL = "https://ton-blockchain.github.io/global.config.json"
@@ -20,6 +21,28 @@ type MainnetVerifier struct {
 	mu        sync.Mutex
 	pool      *liteclient.ConnectionPool
 	api       ton.APIClientWrapped
+}
+
+// VerifyWalletProof validates the complete ton_proof against the wallet code
+// and data obtained from state-init (or mainnet for an already deployed
+// wallet). The proof domain and timestamp are part of the signed message.
+func (v *MainnetVerifier) VerifyWalletProof(ctx context.Context, ownerRaw, proofDomain string, proof tonwallet.TonConnectProof, stateInit []byte, ttl time.Duration) error {
+	owner, err := parseMainnetAddress(ownerRaw)
+	if err != nil {
+		return err
+	}
+	if proof.Domain.LengthBytes != uint32(len([]byte(proof.Domain.Value))) {
+		return fmt.Errorf("TON Proof domain length mismatch")
+	}
+	if ttl <= 0 || ttl > 15*time.Minute {
+		return fmt.Errorf("invalid TON Proof TTL")
+	}
+	api, err := v.client(ctx)
+	if err != nil {
+		return err
+	}
+	return tonwallet.NewTonConnectVerifier(proofDomain, ttl, api).
+		VerifyProof(ctx, owner, proof, proof.Payload, stateInit)
 }
 
 func NewMainnetVerifier(configURL string) *MainnetVerifier {
