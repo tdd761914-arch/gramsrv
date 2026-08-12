@@ -73,7 +73,7 @@ VALUES($1,$2,$3,$4)`, payload, userID, uniqueGiftID, expiresAt); err != nil {
 	return domain.StarGiftClaimChallenge{Payload: payload, UserID: userID, Unique: unique, ExpiresAt: expiresAt}, nil
 }
 
-func (s *StarGiftClaimStore) ResolveChallenge(ctx context.Context, payload string, userID, now int) (domain.StarGiftClaimChallenge, bool, error) {
+func (s *StarGiftClaimStore) ResolveChallenge(ctx context.Context, payload string, userID int64, now int) (domain.StarGiftClaimChallenge, bool, error) {
 	payload = strings.TrimSpace(payload)
 	if s == nil || s.db == nil || len(payload) != 64 || userID <= 0 || now <= 0 {
 		return domain.StarGiftClaimChallenge{}, false, nil
