@@ -480,6 +480,32 @@ func (s *Service) CollectibleAnimationJSON(ctx context.Context, giftID int64, ki
 	if s == nil || s.store == nil {
 		return nil, false, nil
 	}
+	// PostgreSQL keeps the queryable animation projection in JSONB, but JSONB
+	// canonicalization is not a lossless source for every Lottie/TGS document.
+	// Prefer the immutable content-addressed TGS blob and decompress it back to
+	// the original JSON for renderers; the JSONB path remains a compatibility
+	// fallback for memory/test stores and older rows without a blob.
+	if s.blobs != nil {
+		if blobStore, ok := s.store.(interface {
+			CollectibleAnimationBlob(context.Context, int64, domain.StarGiftCollectibleAttributeKind, int64) (domain.FileBlob, bool, error)
+		}); ok {
+			blob, found, err := blobStore.CollectibleAnimationBlob(ctx, giftID, kind, attributeID)
+			if err != nil {
+				return nil, false, err
+			}
+			if found {
+				data, err := s.blobs.Get(ctx, blob.ObjectKey)
+				if err != nil {
+					return nil, false, fmt.Errorf("get collectible animation blob bytes: %w", err)
+				}
+				raw, err := decompressSingleTGS(data)
+				if err != nil {
+					return nil, false, fmt.Errorf("decompress collectible animation blob: %w", err)
+				}
+				return raw, true, nil
+			}
+		}
+	}
 	return s.store.CollectibleAnimationJSON(ctx, giftID, kind, attributeID)
 }
 
