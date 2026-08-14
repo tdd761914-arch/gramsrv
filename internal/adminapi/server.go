@@ -1032,7 +1032,12 @@ func (s *Server) handlePublishStarGiftCollectibles(w http.ResponseWriter, r *htt
 	}
 	req.GiftID = giftID
 	seen := make(map[string]struct{}, len(req.Models)+len(req.Patterns))
-	if len(req.Models)+len(req.Patterns) > 128 {
+	// Keep the wire guard aligned with the domain pool limit.  A collectible
+	// revision may contain up to MaxStarGiftCollectibleAttributesPerKind
+	// attributes in each kind; the endpoint receives models and patterns in one
+	// multipart request, so the combined guard must not reject a valid pool
+	// merely because it has more than the old 128-file operational cap.
+	if len(req.Models)+len(req.Patterns) > domain.MaxStarGiftCollectibleAttributesPerKind {
 		writeError(w, http.StatusBadRequest, "too many collectible animation files")
 		return
 	}

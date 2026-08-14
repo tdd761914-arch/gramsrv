@@ -2151,7 +2151,9 @@ func (s *server) handlePublishStarGiftCollectiblesAPI(w http.ResponseWriter, r *
 		writeAPIError(w, http.StatusBadRequest, "invalid metadata: "+err.Error())
 		return
 	}
-	if len(body.Models)+len(body.Patterns) > 128 {
+	// Match the admin API/domain limit so large, valid collectible pools (for
+	// example a 164-model catalog) can be uploaded through the web panel too.
+	if len(body.Models)+len(body.Patterns) > domain.MaxStarGiftCollectibleAttributesPerKind {
 		writeAPIError(w, http.StatusBadRequest, "too many collectible animation files")
 		return
 	}

@@ -3781,7 +3781,13 @@ func (s *Service) PublishStarGiftCollectibles(ctx context.Context, req PublishSt
 	toAttributes := func(kind domain.StarGiftCollectibleAttributeKind, uploads []StarGiftCollectibleAnimationUpload) ([]domain.StarGiftCollectibleAttribute, error) {
 		attributes := make([]domain.StarGiftCollectibleAttribute, len(uploads))
 		for i := range uploads {
-			animation, err := s.gifts.PrepareAnimation(uploads[i].FileName, uploads[i].Data)
+			// Collectible pools are operator-authored, but their TGS files can
+			// legitimately contain Lottie expression fields (Telegram's own
+			// collectible assets use them).  Keep the same structural, dimension,
+			// frame-rate and external-asset validation while using the policy that
+			// preserves expressions; ordinary user/admin base-gift uploads remain on
+			// the stricter PrepareAnimation path.
+			animation, err := s.gifts.PrepareOfficialAnimation(uploads[i].FileName, uploads[i].Data)
 			if err != nil {
 				return nil, fmt.Errorf("prepare %s %q: %w", kind, uploads[i].Name, err)
 			}

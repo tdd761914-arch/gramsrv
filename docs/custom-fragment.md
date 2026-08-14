@@ -7,6 +7,25 @@ is a short-lived bearer capability. Username minting is not implemented.
 
 ## Contracts
 
+The upstream TON reference implementation requested for new collections is
+vendored at [`contracts/nft-v1.1`](../contracts/nft-v1.1). It is the
+`ton-blockchain/acton-contracts` `nft-v1.1` package (including its wrappers,
+scripts, and tests), with only a local Acton manifest pinned to `1.1.0` so it
+can be built reproducibly alongside gramsrv.
+
+```sh
+cd contracts/nft-v1.1
+acton build NftCollection
+acton test tests
+```
+
+That reference collection deliberately accepts deployment messages only from
+its admin address. The already deployed **InvGram Gifts** collection remains
+the signed-mint compatibility collection for existing withdrawal URLs; it is
+not replaced in place (TON contract addresses and storage layouts are
+immutable). A new upstream collection can be deployed for a future relayer
+flow after its admin wallet and collection address are configured.
+
 The contracts in `contracts/customfragment` are an idiomatic typed Tolk rewrite
 of the minting subset of Telegram's GPL-3.0 TeleMint contracts. They use a new
 storage layout and deterministic item address scheme, so they are not address-
