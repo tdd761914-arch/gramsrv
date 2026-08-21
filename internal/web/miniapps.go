@@ -1,6 +1,7 @@
 package web
 
 import (
+	"bytes"
 	"encoding/json"
 	"html/template"
 	"net/http"
@@ -84,9 +85,15 @@ func (m *MiniApps) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (m *MiniApps) servePage(w http.ResponseWriter, page *template.Template, data any) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
-	if err := page.Execute(w, data); err != nil {
+	var body bytes.Buffer
+	if err := page.Execute(&body, data); err != nil {
 		return
 	}
+	// Telegram puts tgWebAppData in the URL fragment when opening the webapp.
+	// Bootstrap it before the page script reads Telegram.WebApp.initData.
+	const bootstrap = `<script>(function(){if(window.Telegram&&window.Telegram.WebApp&&window.Telegram.WebApp.initData)return;var h=location.hash.slice(1),p=new URLSearchParams(h),d=p.get('tgWebAppData');if(d){window.Telegram=window.Telegram||{};window.Telegram.WebApp=window.Telegram.WebApp||{};window.Telegram.WebApp.initData=d;window.Telegram.WebApp.ready=function(){}}})();</script>`
+	dataBytes := bytes.Replace(body.Bytes(), []byte("<body>"), []byte("<body>"+bootstrap), 1)
+	_, _ = w.Write(dataBytes)
 }
 
 func (m *MiniApps) validateBotToken(w http.ResponseWriter, r *http.Request) {
