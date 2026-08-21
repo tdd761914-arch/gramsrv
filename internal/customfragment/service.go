@@ -88,6 +88,7 @@ type Service struct {
 	renderModel    ModelRenderFunc
 	imageMu        sync.RWMutex
 	imageCache     map[string][]byte
+	animationCache map[string][]byte
 	logger         *zap.Logger
 }
 
@@ -178,7 +179,8 @@ func New(cfg Config, ledger GiftLedger, verifier Verifier, logger *zap.Logger) (
 		privateKey: privateKey, publicKey: publicKey, collection: collection, collectionName: collectionName,
 		mintAmount: mintAmount, subwalletID: subwalletID, authTTL: authTTL,
 		ledger: ledger, verifier: verifier, logger: logger,
-		renderModel: renderModel, imageCache: make(map[string][]byte),
+		renderModel: renderModel,
+		imageCache:  make(map[string][]byte), animationCache: make(map[string][]byte),
 	}, nil
 }
 

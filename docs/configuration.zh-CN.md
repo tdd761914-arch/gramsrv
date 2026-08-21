@@ -84,6 +84,10 @@ live expanded buffer 释放后会归还进程内存，但不会返还该 frame �
 | `TELESRV_PUBLIC_WEB_BASE_URL` | HTTP(S) URL / `https://weba.telesrv.net` | username 页面 Web 客户端入口，校验规则同 `TELESRV_PUBLIC_BASE_URL`。 |
 | `TELESRV_PUBLIC_APP_NAME` | string / `TELESRV_BRAND_PRODUCT_NAME` | 公开落地页产品名；trim 后非空、无控制字符、最多 64 个 Unicode 字符。 |
 | `TELESRV_PUBLIC_LINK_WEB_ADDR` | nullable address / 空 | 只读 username/avatar/sticker/emoji/chatlist/collectible gift 落地页监听；空值关闭。生产应 loopback + nginx 精确反代；`.env.example` 为开发启用 `127.0.0.1:2401`。 |
+| `TELESRV_CUSTOM_FRAGMENT_ENABLE` | bool / `false` | 启用自托管 TON 主网礼物提取与 CustomFragment 路由；需要 public Web listener、collection 和签名密钥。 |
+| `TELESRV_CUSTOM_FRAGMENT_PUBLIC_BASE_URL` | HTTP(S) URL / `TELESRV_PUBLIC_BASE_URL` | CustomFragment metadata、PNG 海报、原始 `.lottie.json` 和提取链接使用的公开根地址。若原生客户端会把路径识别成内部 app link，生产应使用独立 HTTPS 域名。 |
+| `TELESRV_CUSTOM_FRAGMENT_SIGNING_KEY_FILE` | path / `data/customfragment/mint-authority.key` | Ed25519 mint authority 密钥；禁止入库，重启间保持稳定。 |
+| `TELESRV_CUSTOM_FRAGMENT_GIFT_COLLECTION` | TON basechain address / 空 | CustomFragment 主网 collection 地址；启用功能时必填。 |
 | `TELESRV_TELEGRAM_LOGIN_ENABLE` | bool / `false` | 在 `TELESRV_PUBLIC_LINK_WEB_ADDR` 上挂载自建 Telegram Login/OIDC Provider；启用时必须同时配置该 listener 与下列全部密钥文件。 |
 | `TELESRV_TELEGRAM_LOGIN_ISSUER` | 绝对 origin URL / `TELESRV_PUBLIC_BASE_URL` | discovery 与 token 使用的精确公开 issuer；默认必须 HTTPS，禁止 path、credentials、query、fragment。开启下一项后可直接配置任意 HTTP 域名/IP。 |
 | `TELESRV_TELEGRAM_LOGIN_ALLOW_HTTP` | bool / `false` | 开启后允许任意合法 HTTP issuer、BotFather Web origin、redirect URI 和 native HTTP callback，不限制为 loopback，也不限制 IP 网段或端口。关闭时这些 Web URL 仍必须 HTTPS。 |

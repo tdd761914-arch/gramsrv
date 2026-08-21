@@ -1,0 +1,51 @@
+# Build gramsrv with native rlottie support for CustomFragment gift posters.
+# The regular Go build remains portable and serves metadata/Lottie JSON, while
+# this image enables the PNG poster renderer used by the media endpoint.
+#
+#   docker build -t gramsrv-rlottie -f Dockerfile.rlottie .
+#   docker run --rm --env-file .env -p 2398:2398 -p 2401:2401 gramsrv-rlottie
+
+FROM golang:1.25-bookworm AS rlottie-build
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    meson ninja-build g++ pkg-config git ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN git clone --depth 1 https://github.com/Samsung/rlottie.git /rlottie \
+    && cd /rlottie \
+    && meson setup build -Dexample=false -Dtest=false --libdir=lib --prefix=/usr/local \
+    && ninja -C build \
+    && ninja -C build install
+
+FROM golang:1.25-bookworm AS gramsrv-build
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    pkg-config g++ \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=rlottie-build /usr/local/include/ /usr/local/include/
+COPY --from=rlottie-build /usr/local/lib/ /usr/local/lib/
+RUN ldconfig
+
+WORKDIR /src
+COPY . .
+
+ENV CGO_ENABLED=1
+RUN go build -tags=rlottie -o /app/gramsrv ./cmd/telesrv
+
+FROM debian:bookworm-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=rlottie-build /usr/local/lib/ /usr/local/lib/
+RUN ldconfig
+
+WORKDIR /app
+COPY --from=gramsrv-build /app/gramsrv /app/gramsrv
+COPY data /app/data
+COPY deploy/migrations /app/deploy/migrations
+
+EXPOSE 2398 2401 2599 2600
+ENTRYPOINT ["/app/gramsrv"]

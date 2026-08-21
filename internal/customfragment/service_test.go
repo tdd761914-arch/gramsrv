@@ -28,6 +28,10 @@ type fakeLedger struct {
 	item                 string
 	animationKind        domain.StarGiftCollectibleAttributeKind
 	animationAttributeID int64
+	animationCalls       int
+	animationKinds       []domain.StarGiftCollectibleAttributeKind
+	animationIDs         []int64
+	renderPositions      []float64
 }
 
 func (f *fakeLedger) ResolveWithdrawal(_ context.Context, requestID string) (domain.StarGiftWithdrawal, bool, error) {
@@ -54,7 +58,19 @@ func (f *fakeLedger) UniqueBySlug(_ context.Context, slug string) (domain.Unique
 
 func (f *fakeLedger) CollectibleAnimationJSON(_ context.Context, _ int64, kind domain.StarGiftCollectibleAttributeKind, attributeID int64) ([]byte, bool, error) {
 	f.animationKind, f.animationAttributeID = kind, attributeID
+	f.animationCalls++
+	f.animationKinds = append(f.animationKinds, kind)
+	f.animationIDs = append(f.animationIDs, attributeID)
 	return []byte(`{"v":"5.5.2"}`), true, nil
+}
+
+func (f *fakeLedger) hasAnimationRequest(kind domain.StarGiftCollectibleAttributeKind, attributeID int64) bool {
+	for i := range f.animationKinds {
+		if f.animationKinds[i] == kind && f.animationIDs[i] == attributeID {
+			return true
+		}
+	}
+	return false
 }
 
 type fakeVerifier struct {
@@ -98,7 +114,8 @@ func testService(t *testing.T, now time.Time) (*Service, *fakeLedger, *fakeVerif
 		PublicBaseURL: "https://grams.example", AppName: "Gramsrv", SigningKey: privateKey,
 		GiftCollection: collection.String(), MintAmountNanoton: 80_000_000,
 		SubwalletID: defaultSubwalletID, AuthorizationTTL: 5 * time.Minute,
-		ModelRenderer: func(_ []byte, width, height int, _ float64) (*image.NRGBA, error) {
+		ModelRenderer: func(_ []byte, width, height int, position float64) (*image.NRGBA, error) {
+			ledger.renderPositions = append(ledger.renderPositions, position)
 			frame := image.NewNRGBA(image.Rect(0, 0, width, height))
 			frame.SetNRGBA(width/2, height/2, color.NRGBA{R: 255, A: 255})
 			return frame, nil
@@ -212,8 +229,22 @@ func TestHTTPPageAndMetadata(t *testing.T) {
 	service.ServeHTTP(metadata, httptest.NewRequest(http.MethodGet, "/custom-fragment/metadata/gift/CrystalStar-42.json", nil))
 	if metadata.Code != http.StatusOK || !strings.Contains(metadata.Body.String(), `"name":"CrystalStar-42"`) ||
 		!strings.Contains(metadata.Body.String(), `"image":"https://grams.example/custom-fragment/media/gift/CrystalStar-42.png"`) ||
+		!strings.Contains(metadata.Body.String(), `"lottie":"https://grams.example/custom-fragment/media/gift/CrystalStar-42.lottie.json"`) ||
 		!strings.Contains(metadata.Body.String(), `"trait_type":"Model"`) {
 		t.Fatalf("metadata status=%d body=%q", metadata.Code, metadata.Body.String())
+	}
+
+	animation := httptest.NewRecorder()
+	service.ServeHTTP(animation, httptest.NewRequest(http.MethodGet, "/custom-fragment/media/gift/CrystalStar-42.lottie.json", nil))
+	if animation.Code != http.StatusOK || animation.Header().Get("Content-Type") != "application/json" ||
+		animation.Body.String() != `{"v":"5.5.2"}` {
+		t.Fatalf("animation status=%d content-type=%q body=%q", animation.Code, animation.Header().Get("Content-Type"), animation.Body.String())
+	}
+	animationCalls := ledger.animationCalls
+	animationCached := httptest.NewRecorder()
+	service.ServeHTTP(animationCached, httptest.NewRequest(http.MethodGet, "/custom-fragment/media/gift/CrystalStar-42.lottie.json", nil))
+	if animationCached.Code != http.StatusOK || ledger.animationCalls != animationCalls {
+		t.Fatalf("cached animation status=%d calls=%d want=%d", animationCached.Code, ledger.animationCalls, animationCalls)
 	}
 
 	poster := httptest.NewRecorder()
@@ -225,8 +256,11 @@ func TestHTTPPageAndMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if ledger.animationKind != domain.StarGiftCollectibleModel || ledger.animationAttributeID != 11 {
-		t.Fatalf("poster requested %s/%d; pattern must not be rendered", ledger.animationKind, ledger.animationAttributeID)
+	if !ledger.hasAnimationRequest(domain.StarGiftCollectibleModel, 11) || !ledger.hasAnimationRequest(domain.StarGiftCollectiblePattern, 12) {
+		t.Fatalf("poster animation requests = %#v/%#v; want model and pattern", ledger.animationKinds, ledger.animationIDs)
+	}
+	if len(ledger.renderPositions) == 0 || ledger.renderPositions[0] != 0 {
+		t.Fatalf("first render position = %#v; want rest frame 0", ledger.renderPositions)
 	}
 	r, g, b, a := decoded.At(512, 512).RGBA()
 	if r != 0xffff || g != 0 || b != 0 || a != 0xffff {

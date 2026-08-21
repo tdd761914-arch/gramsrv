@@ -25,7 +25,7 @@ import (
 	"telesrv/internal/domain"
 )
 
-const maxGiftImageCacheEntries = 128
+const maxGiftMediaCacheEntries = 128
 
 const owlJumpingRopeJSONSHA256 = "85b10fc39941272ad3a370fe07c08d6b36453917550c9aa9f79d94c0814d999b"
 
@@ -112,6 +112,8 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		serveIcon(w)
 	case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/custom-fragment/metadata/gift/"):
 		s.serveGiftMetadata(w, r)
+	case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/custom-fragment/media/gift/") && strings.HasSuffix(r.URL.Path, ".lottie.json"):
+		s.serveGiftAnimation(w, r)
 	case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/custom-fragment/media/gift/"):
 		s.serveGiftImage(w, r)
 	case r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/custom-fragment/api/gifts/"):
@@ -194,6 +196,7 @@ func (s *Service) serveGiftMetadata(w http.ResponseWriter, r *http.Request) {
 		"name":         gift.Slug,
 		"description":  "A unique collectible gift exported from " + s.appName + " to TON mainnet.",
 		"image":        s.publicBaseURL + path.Join("/custom-fragment/media/gift/", gift.Slug+".png"),
+		"lottie":       s.publicBaseURL + path.Join("/custom-fragment/media/gift/", gift.Slug+".lottie.json"),
 		"external_url": s.publicBaseURL + path.Join("/nft/", gift.Slug),
 		"attributes":   attributes,
 	})
@@ -217,6 +220,68 @@ func (s *Service) serveGiftImage(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(data)
 }
 
+func (s *Service) serveGiftAnimation(w http.ResponseWriter, r *http.Request) {
+	slug := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/custom-fragment/media/gift/"), ".lottie.json")
+	gift, ok := s.resolvePublicGift(w, r, slug)
+	if !ok {
+		return
+	}
+	data, err := s.giftAnimationJSON(r.Context(), gift)
+	if err != nil {
+		s.logger.Warn("load CustomFragment gift animation", zap.String("slug", gift.Slug), zap.Error(err))
+		http.Error(w, "gift animation is temporarily unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "public, max-age=86400, immutable")
+	w.Header().Set("Content-Length", strconv.Itoa(len(data)))
+	_, _ = w.Write(data)
+}
+
+// giftAnimationJSON serves the selected collectible model's Lottie document
+// as-is. The endpoint mirrors Fragment's .lottie.json media convention: the
+// animation stays JSON (rather than being rasterized or wrapped in metadata)
+// so clients can choose their own frame and renderer.
+func (s *Service) giftAnimationJSON(ctx context.Context, gift domain.UniqueStarGift) ([]byte, error) {
+	return s.collectibleAnimationJSON(ctx, gift, domain.StarGiftCollectibleModel, gift.Model.ID)
+}
+
+func (s *Service) collectibleAnimationJSON(ctx context.Context, gift domain.UniqueStarGift, kind domain.StarGiftCollectibleAttributeKind, attributeID int64) ([]byte, error) {
+	if attributeID <= 0 {
+		return nil, errors.New("collectible animation attribute is unavailable")
+	}
+	cacheKey := fmt.Sprintf("%s:%s:%d", gift.Slug, kind, attributeID)
+	s.imageMu.RLock()
+	cached := append([]byte(nil), s.animationCache[cacheKey]...)
+	s.imageMu.RUnlock()
+	if len(cached) > 0 {
+		return cached, nil
+	}
+	resolver, ok := s.ledger.(collectibleModelAnimationResolver)
+	if !ok {
+		return nil, errors.New("collectible animation resolver is unavailable")
+	}
+	modelJSON, found, err := resolver.CollectibleAnimationJSON(ctx, gift.GiftID, kind, attributeID)
+	if err != nil {
+		return nil, fmt.Errorf("load %s animation: %w", kind, err)
+	}
+	if !found || len(modelJSON) == 0 {
+		return nil, fmt.Errorf("selected %s animation is unavailable", kind)
+	}
+	if !json.Valid(modelJSON) {
+		return nil, fmt.Errorf("selected %s animation is invalid JSON", kind)
+	}
+
+	data := append([]byte(nil), modelJSON...)
+	s.imageMu.Lock()
+	if len(s.animationCache) >= maxGiftMediaCacheEntries {
+		clear(s.animationCache)
+	}
+	s.animationCache[cacheKey] = data
+	s.imageMu.Unlock()
+	return append([]byte(nil), data...), nil
+}
+
 func (s *Service) giftImagePNG(ctx context.Context, gift domain.UniqueStarGift) ([]byte, error) {
 	s.imageMu.RLock()
 	cached := append([]byte(nil), s.imageCache[gift.Slug]...)
@@ -224,16 +289,16 @@ func (s *Service) giftImagePNG(ctx context.Context, gift domain.UniqueStarGift) 
 	if len(cached) > 0 {
 		return cached, nil
 	}
-	resolver, ok := s.ledger.(collectibleModelAnimationResolver)
-	if !ok || gift.Model.ID <= 0 {
-		return nil, errors.New("collectible model animation resolver is unavailable")
-	}
-	modelJSON, found, err := resolver.CollectibleAnimationJSON(ctx, gift.GiftID, domain.StarGiftCollectibleModel, gift.Model.ID)
-	if err != nil || !found || len(modelJSON) == 0 {
-		return nil, fmt.Errorf("load selected model animation: %w", err)
+	modelJSON, err := s.collectibleAnimationJSON(ctx, gift, domain.StarGiftCollectibleModel, gift.Model.ID)
+	if err != nil {
+		return nil, err
 	}
 	const canvasSize, modelSize = 1024, 1024
-	model, renderErr := s.renderModel(modelJSON, modelSize, modelSize, 0.22)
+	// Render the rest pose (frame 0), not an arbitrary point in the loop. This
+	// keeps static posters centered when an animation begins with a reveal or
+	// spin and matches the model shown by the official gift catalog.
+	const modelRestPosition = 0
+	model, renderErr := s.renderModel(modelJSON, modelSize, modelSize, modelRestPosition)
 	if renderErr != nil || !hasVisibleAlpha(model) {
 		model, err = fallbackModelRaster(modelJSON)
 		if err != nil {
@@ -244,8 +309,10 @@ func (s *Service) giftImagePNG(ctx context.Context, gift domain.UniqueStarGift) 
 		}
 	}
 	canvas := renderBackdrop(canvasSize, gift.Backdrop.CenterColor, gift.Backdrop.EdgeColor)
-	// Deliberately composite only the selected model. The collectible pattern is
-	// a Telegram profile-card effect and is excluded from the NFT poster.
+	// Patterns are a best-effort decorative layer. Older gifts may not have a
+	// stored pattern or a renderer-compatible document; that must not make the
+	// model poster unavailable.
+	s.compositePattern(ctx, canvas, gift)
 	draw.Draw(canvas, image.Rect(0, 0, modelSize, modelSize), model, image.Point{}, draw.Over)
 	var encoded bytes.Buffer
 	encoder := png.Encoder{CompressionLevel: png.BestSpeed}
@@ -254,12 +321,78 @@ func (s *Service) giftImagePNG(ctx context.Context, gift domain.UniqueStarGift) 
 	}
 	data := encoded.Bytes()
 	s.imageMu.Lock()
-	if len(s.imageCache) >= maxGiftImageCacheEntries {
+	if len(s.imageCache) >= maxGiftMediaCacheEntries {
 		clear(s.imageCache)
 	}
 	s.imageCache[gift.Slug] = append([]byte(nil), data...)
 	s.imageMu.Unlock()
 	return data, nil
+}
+
+// compositePattern renders the collectible pattern into a small alpha tile,
+// tints it with the backdrop's pattern color, and repeats it behind the model.
+func (s *Service) compositePattern(ctx context.Context, canvas *image.NRGBA, gift domain.UniqueStarGift) {
+	if gift.Pattern.ID <= 0 {
+		return
+	}
+	patternJSON, err := s.collectibleAnimationJSON(ctx, gift, domain.StarGiftCollectiblePattern, gift.Pattern.ID)
+	if err != nil {
+		s.logger.Debug("CustomFragment pattern animation unavailable", zap.String("slug", gift.Slug), zap.Error(err))
+		return
+	}
+	const tileSize = 132
+	tile, err := s.renderModel(patternJSON, tileSize, tileSize, 0)
+	if err != nil || !hasVisibleAlpha(tile) {
+		return
+	}
+	tilePattern(canvas, tintPattern(tile, gift.Backdrop.PatternColor, 0.5))
+}
+
+func tintPattern(src *image.NRGBA, rgb int, opacity float64) *image.NRGBA {
+	if src == nil {
+		return nil
+	}
+	if opacity < 0 {
+		opacity = 0
+	} else if opacity > 1 {
+		opacity = 1
+	}
+	tint := rgbColor(rgb)
+	out := image.NewNRGBA(src.Bounds())
+	for i := 0; i+3 < len(src.Pix); i += 4 {
+		alpha := src.Pix[i+3]
+		if alpha == 0 {
+			continue
+		}
+		out.Pix[i] = tint.R
+		out.Pix[i+1] = tint.G
+		out.Pix[i+2] = tint.B
+		out.Pix[i+3] = uint8(math.Round(float64(alpha) * opacity))
+	}
+	return out
+}
+
+func tilePattern(canvas, tile *image.NRGBA) {
+	if canvas == nil || tile == nil {
+		return
+	}
+	tw, th := tile.Bounds().Dx(), tile.Bounds().Dy()
+	size := canvas.Bounds().Dx()
+	if tw <= 0 || th <= 0 || size <= 0 {
+		return
+	}
+	stepX, stepY := tw+tw/3, th+th/3
+	row := 0
+	for y := -th; y < size+th; y += stepY {
+		offsetX := 0
+		if row%2 == 1 {
+			offsetX = stepX / 2
+		}
+		for x := -tw - offsetX; x < size+tw; x += stepX {
+			draw.Draw(canvas, tile.Bounds().Add(image.Pt(x, y)), tile, image.Point{}, draw.Over)
+		}
+		row++
+	}
 }
 
 func hasVisibleAlpha(model *image.NRGBA) bool {

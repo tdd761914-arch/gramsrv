@@ -1104,7 +1104,7 @@ func run(logger *zap.Logger) error {
 	var customFragmentService *customfragment.Service
 	if cfg.CustomFragmentEnabled {
 		customFragmentService, err = customfragment.New(customfragment.Config{
-			PublicBaseURL: cfg.PublicBaseURL, AppName: cfg.PublicAppName,
+			PublicBaseURL: cfg.CustomFragmentPublicBaseURL, AppName: cfg.PublicAppName,
 			SigningKeyFile:      cfg.CustomFragmentSigningKeyFile,
 			GiftCollection:      cfg.CustomFragmentGiftCollection,
 			CollectionName:      cfg.CustomFragmentCollectionName,

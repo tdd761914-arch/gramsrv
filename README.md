@@ -137,6 +137,7 @@ is a copyable development template, not an exhaustive parameter dictionary.
 | `TELESRV_LOGIN_EMAIL_REQUIRE_SETUP` | `false` | force phone login/registration to set a login email first |
 | `TELESRV_SMTP_HOST` | empty | SMTP host used when login email verification is enabled |
 | `TELESRV_PUBLIC_BASE_URL` | `https://telesrv.net` | canonical external base URL for username, sticker, emoji, and chatlist links |
+| `TELESRV_CUSTOM_FRAGMENT_PUBLIC_BASE_URL` | `TELESRV_PUBLIC_BASE_URL` | external root for CustomFragment gift metadata, PNG posters, raw Lottie JSON, and withdrawal links |
 | `TELESRV_PUBLIC_APP_SCHEME` | `telesrv` | custom URL scheme opened by public landing pages |
 | `TELESRV_PUBLIC_WEB_BASE_URL` | `https://web.telesrv.net` | Web client base URL shown on public landing pages |
 | `TELESRV_PUBLIC_APP_NAME` | `telesrv` | display product name for public landing pages |

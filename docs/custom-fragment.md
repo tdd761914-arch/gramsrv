@@ -77,4 +77,11 @@ Public routes:
 - `/custom-fragment/tonconnect-manifest.json` — TON Connect manifest;
 - `/custom-fragment/collection.json` — TEP-64 metadata for **InvGram Gifts**;
 - `/custom-fragment/metadata/gift/{slug}.json` — TEP-64 metadata;
-- `/custom-fragment/media/gift/{slug}.svg` — deterministic gift artwork.
+- `/custom-fragment/media/gift/{slug}.png` — rendered gift poster with its
+  backdrop, tiled pattern, and model rest frame;
+- `/custom-fragment/media/gift/{slug}.lottie.json` — the selected model's raw
+  Lottie JSON, cached in memory and suitable for client-side animation.
+
+The media routes and all metadata URLs use
+`TELESRV_CUSTOM_FRAGMENT_PUBLIC_BASE_URL`, so CustomFragment can live on a
+dedicated HTTPS host while the main server keeps its normal public URL.
