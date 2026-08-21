@@ -10,6 +10,10 @@ The protocol stack is built on the published
 (`v1.1.0`), using a canonical Layer 228 schema with sparse `tlprofile`
 exact Layer 225-228 compatibility profiles.
 
+This project is based on [`iamxvbaba/gramsrv`](https://github.com/iamxvbaba/gramsrv).
+The `Flashgram-OSS/gramsrv` repository preserves that upstream attribution and
+contains the organization-specific changes and integrations maintained here.
+
 If you are looking for a **Telegram server**, **MTProto server**,
 **Telegram backend**, **Telegram clone server**, or **self-hosted
 Telegram-like chat server**, this repository is the server-side implementation
