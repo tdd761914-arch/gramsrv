@@ -84,6 +84,8 @@ live expanded buffer 释放后会归还进程内存，但不会返还该 frame �
 | `TELESRV_PUBLIC_WEB_BASE_URL` | HTTP(S) URL / `https://weba.telesrv.net` | username 页面 Web 客户端入口，校验规则同 `TELESRV_PUBLIC_BASE_URL`。 |
 | `TELESRV_PUBLIC_APP_NAME` | string / `TELESRV_BRAND_PRODUCT_NAME` | 公开落地页产品名；trim 后非空、无控制字符、最多 64 个 Unicode 字符。 |
 | `TELESRV_PUBLIC_LINK_WEB_ADDR` | nullable address / 空 | 只读 username/avatar/sticker/emoji/chatlist/collectible gift 落地页监听；空值关闭。生产应 loopback + nginx 精确反代；`.env.example` 为开发启用 `127.0.0.1:2401`。 |
+| `TELESRV_MINIAPP_BOTFATHER_TOKEN` | `<93372553>:<35字符secret>` / 空 | 本地 BotFather Mini App 使用的仅服务端 token；启动 RPC/Web 前写入内置 BotFather 行，用于签名/校验 `initData`，绝不渲染到 HTML 或列表 API。 |
+| `TELESRV_MINIAPP_STICKERS_TOKEN` | `<1063110917>:<35字符secret>` / 空 | 本地 Stickers Mini App 使用的仅服务端 token；必须有 35 字符 secret 才允许写操作，空值会保持功能不可用，不接受可伪造的 `initData`。 |
 | `TELESRV_CUSTOM_FRAGMENT_ENABLE` | bool / `false` | 启用自托管 TON 主网礼物提取与 CustomFragment 路由；需要 public Web listener、collection 和签名密钥。 |
 | `TELESRV_CUSTOM_FRAGMENT_PUBLIC_BASE_URL` | HTTP(S) URL / `TELESRV_PUBLIC_BASE_URL` | CustomFragment metadata、PNG 海报、原始 `.lottie.json` 和提取链接使用的公开根地址。若原生客户端会把路径识别成内部 app link，生产应使用独立 HTTPS 域名。 |
 | `TELESRV_CUSTOM_FRAGMENT_SIGNING_KEY_FILE` | path / `data/customfragment/mint-authority.key` | Ed25519 mint authority 密钥；禁止入库，重启间保持稳定。 |

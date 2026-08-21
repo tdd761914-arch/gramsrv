@@ -217,7 +217,11 @@ func newHandler(cfg Config, logger *zap.Logger) (http.Handler, error) {
 		mux.Handle("GET /stickers/{$}", cfg.MiniApps)
 		mux.Handle("GET /api/miniapps/botfather/status", cfg.MiniApps)
 		mux.Handle("POST /api/miniapps/botfather/validate", cfg.MiniApps)
+		mux.Handle("GET /api/miniapps/botfather/bots", cfg.MiniApps)
+		mux.Handle("POST /api/miniapps/botfather/bots", cfg.MiniApps)
 		mux.Handle("GET /api/miniapps/stickers", cfg.MiniApps)
+		mux.Handle("GET /api/miniapps/stickers/mine", cfg.MiniApps)
+		mux.Handle("POST /api/miniapps/stickers", cfg.MiniApps)
 		mux.Handle("GET /api/miniapps/stickers/{shortName}", cfg.MiniApps)
 	}
 	if cfg.ModerationAppeals != nil {

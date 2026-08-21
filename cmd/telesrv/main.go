@@ -904,6 +904,16 @@ func run(logger *zap.Logger) error {
 	}
 
 	botStore := postgres.NewBotStore(pool)
+	// Mini App initData is signed with the launching service bot token. The
+	// built-in service bots ship without a token for MTProto-only deployments;
+	// when Mini Apps are enabled, install explicit secrets before constructing
+	// the RPC/web services so both the signer and verifier use the same value.
+	if err := configureMiniAppBotSecret(ctx, botStore, domain.BotFatherUserID, "TELESRV_MINIAPP_BOTFATHER_TOKEN"); err != nil {
+		return err
+	}
+	if err := configureMiniAppBotSecret(ctx, botStore, domain.StickersBotUserID, "TELESRV_MINIAPP_STICKERS_TOKEN"); err != nil {
+		return err
+	}
 	// userCache 与 users 服务共享同一实例：bot 元数据写入（version bump）后必须
 	// 失效缓存，否则 TTL 内 getUsers 回旧 first_name/旧 bot_info_version。
 	userCache := redisstore.NewUserCache(rdb, redisstore.DefaultUserCacheTTL)
@@ -1616,22 +1626,31 @@ func run(logger *zap.Logger) error {
 		return fmt.Errorf("start admin api: %w", err)
 	}
 	if _, err := web.Start(ctx, web.Config{
-		Addr:              cfg.PublicLinkWebAddr,
-		PublicBaseURL:     cfg.PublicBaseURL,
-		AppScheme:         cfg.PublicAppScheme,
-		AppLinkBase:       cfg.PublicAppLinkBase,
-		WebBaseURL:        cfg.PublicWebBaseURL,
-		AppName:           cfg.PublicAppName,
-		StickerSets:       filesService,
-		Users:             userStore,
-		Channels:          channelStore,
-		Privacy:           privacyService,
-		Photos:            filesService,
-		UniqueGifts:       giftsService,
-		GiftWithdrawals:   giftsService,
-		CustomFragment:    customFragmentService,
-		GiftClaim:         giftClaimService,
-		MiniApps:          web.NewMiniAppsHandler(cfg.PublicAppName),
+		Addr:            cfg.PublicLinkWebAddr,
+		PublicBaseURL:   cfg.PublicBaseURL,
+		AppScheme:       cfg.PublicAppScheme,
+		AppLinkBase:     cfg.PublicAppLinkBase,
+		WebBaseURL:      cfg.PublicWebBaseURL,
+		AppName:         cfg.PublicAppName,
+		StickerSets:     filesService,
+		Users:           userStore,
+		Channels:        channelStore,
+		Privacy:         privacyService,
+		Photos:          filesService,
+		UniqueGifts:     giftsService,
+		GiftWithdrawals: giftsService,
+		CustomFragment:  customFragmentService,
+		GiftClaim:       giftClaimService,
+		MiniApps: web.NewConfiguredMiniAppsHandler(web.MiniAppsConfig{
+			AppName:  cfg.PublicAppName,
+			Bots:     botsService,
+			Stickers: filesService,
+			Tokens:   botStore,
+			// Telegram signs Mini App initData with the launching bot token.
+			// Keep these secrets server-side; the HTML/JS never receives them.
+			BotFatherToken: os.Getenv("TELESRV_MINIAPP_BOTFATHER_TOKEN"),
+			StickersToken:  os.Getenv("TELESRV_MINIAPP_STICKERS_TOKEN"),
+		}),
 		ModerationAppeals: moderationService,
 		TelegramLogin:     telegramLoginHTTPHandler,
 	}, logger.Named("public-web")); err != nil {
@@ -1685,6 +1704,21 @@ func run(logger *zap.Logger) error {
 	// This is intentionally the final startup operation. ListenAndServe owns the
 	// public listener so no seed/prewarm work can run after port 2398 is exposed.
 	return srv.ListenAndServe(ctx, cfg.ListenAddr)
+}
+
+func configureMiniAppBotSecret(ctx context.Context, bots storepkg.BotStore, botID int64, envName string) error {
+	raw := strings.TrimSpace(os.Getenv(envName))
+	if raw == "" {
+		return nil
+	}
+	parsedID, secret, ok := domain.ParseBotToken(raw)
+	if !ok || parsedID != botID || len(secret) != domain.BotTokenSecretLength {
+		return fmt.Errorf("%s must be %d:<%d-character secret>", envName, botID, domain.BotTokenSecretLength)
+	}
+	if err := bots.UpdateBotTokenSecret(ctx, botID, secret); err != nil {
+		return fmt.Errorf("configure %s: %w", envName, err)
+	}
+	return nil
 }
 
 // telegramLoginRPCDependency preserves a disabled Telegram Login service as a

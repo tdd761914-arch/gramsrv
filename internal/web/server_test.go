@@ -60,10 +60,11 @@ func TestCustomFragmentRoutesDoNotConflictWithUsernameLinks(t *testing.T) {
 }
 
 func TestLocalMiniAppsUseGramsrvRoutes(t *testing.T) {
+	miniSets := miniAppsStickerStub{sets: []domain.StickerSet{{ID: 1, ShortName: "flashgram", Title: "Flashgram", Count: 3, Kind: domain.StickerSetKindStickers}}}
 	h, err := NewHandler(Config{
 		StickerSets:   fakeResolver{},
 		PublicBaseURL: "https://links.example.test",
-		MiniApps:      NewMiniAppsHandler("Flashgram"),
+		MiniApps:      NewConfiguredMiniAppsHandler(MiniAppsConfig{AppName: "Flashgram", Stickers: miniSets}),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -86,6 +87,35 @@ func TestLocalMiniAppsUseGramsrvRoutes(t *testing.T) {
 	if sets.Code != http.StatusOK || !strings.Contains(sets.Body.String(), "flashgram") {
 		t.Fatalf("sets status=%d body=%q", sets.Code, sets.Body.String())
 	}
+}
+
+type miniAppsStickerStub struct{ sets []domain.StickerSet }
+
+func (s miniAppsStickerStub) ListStickerSets(_ context.Context, kind domain.StickerSetKind) ([]domain.StickerSet, error) {
+	out := make([]domain.StickerSet, 0, len(s.sets))
+	for _, set := range s.sets {
+		if set.Kind == kind {
+			out = append(out, set)
+		}
+	}
+	return out, nil
+}
+
+func (s miniAppsStickerStub) ResolveStickerSet(_ context.Context, ref domain.StickerSetRef) (domain.StickerSet, []domain.Document, bool, error) {
+	for _, set := range s.sets {
+		if ref.Kind == domain.StickerSetRefByShortName && set.ShortName == ref.ShortName {
+			return set, nil, true, nil
+		}
+	}
+	return domain.StickerSet{}, nil, false, nil
+}
+
+func (s miniAppsStickerStub) ListCreatedStickerSets(context.Context, int64, int64, int) ([]domain.StickerSet, int, error) {
+	return nil, 0, nil
+}
+
+func (s miniAppsStickerStub) CreateStickerSet(context.Context, domain.CreateStickerSetRequest) (domain.StickerSet, []domain.Document, error) {
+	return domain.StickerSet{}, nil, nil
 }
 
 func newTestHandlerWithPublicPeers(

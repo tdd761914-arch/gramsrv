@@ -89,9 +89,10 @@ Public routes:
   Lottie JSON, cached in memory and suitable for client-side animation.
 
 The public Web listener also exposes `/botfather` and `/stickers` as local
-Telegram-style mini-app shells. They use only relative `/api/miniapps/*`
-requests; the BotFather page validates token syntax locally and intentionally
-does not retain or forward credentials.
+Telegram-style mini apps. They use only relative `/api/miniapps/*` requests;
+creation is delegated to the existing bot/files services and requires signed
+Telegram `initData`. A newly generated bot token is returned once over the
+server response and is not retained by the page.
 
 The media routes and all metadata URLs use
 `TELESRV_CUSTOM_FRAGMENT_PUBLIC_BASE_URL`, so CustomFragment can live on a
