@@ -252,12 +252,17 @@ type StarGiftClaimChallenge struct {
 }
 
 type StarGiftOnChainClaim struct {
-	Payload       string
-	UserID        int64
-	UniqueGiftID  int64
-	WalletAddress string
-	GiftAddress   string
-	ClaimedAt     int
+	Payload      string
+	UserID       int64
+	UniqueGiftID int64
+	// ExpectedPreviousWallet is the last wallet observed by the database before
+	// the TON proof was verified.  CommitClaim uses it as a compare-and-swap
+	// guard so a transfer/reconciliation racing the claim cannot overwrite a
+	// newer owner projection.
+	ExpectedPreviousWallet string
+	WalletAddress          string
+	GiftAddress            string
+	ClaimedAt              int
 }
 
 type StarGiftOnChainClaimResult struct {

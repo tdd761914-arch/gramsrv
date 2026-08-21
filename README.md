@@ -208,6 +208,10 @@ points to your public IP so clients can connect.
 
 `gramsrv` can serve public landing pages for `/<username>`, profile avatars,
 `/addstickers/<shortName>`, `/addemoji/<shortName>`, and `/addlist/<slug>`.
+The same listener also serves the self-hosted Telegram-style `/botfather` and
+`/stickers` mini-app shells. Their browser API is under `/api/miniapps/*` and
+does not call Telegram or a Telegram CDN; BotFather token validation is a
+format-only local stub until an authenticated provider is configured.
 
 Use `TELESRV_PUBLIC_LINK_WEB_ADDR` as the local HTTP bind address:
 

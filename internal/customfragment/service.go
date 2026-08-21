@@ -23,6 +23,7 @@ import (
 	"github.com/xssnick/tonutils-go/address"
 	"github.com/xssnick/tonutils-go/tvm/cell"
 	"go.uber.org/zap"
+	"golang.org/x/sync/singleflight"
 
 	"telesrv/internal/domain"
 	"telesrv/internal/lottierender"
@@ -89,6 +90,7 @@ type Service struct {
 	imageMu        sync.RWMutex
 	imageCache     map[string][]byte
 	animationCache map[string][]byte
+	confirmSF      singleflight.Group
 	logger         *zap.Logger
 }
 
@@ -257,6 +259,23 @@ func (s *Service) Confirm(ctx context.Context, requestID, walletAddress string, 
 	if s == nil || !validRequestID(requestID) {
 		return Confirmation{}, ErrInvalidRequest
 	}
+	value, err, _ := s.confirmSF.Do(requestID, func() (any, error) {
+		return s.confirmOnce(ctx, requestID, walletAddress, now)
+	})
+	if err != nil {
+		return Confirmation{}, err
+	}
+	confirmation, ok := value.(Confirmation)
+	if !ok {
+		return Confirmation{}, ErrUnavailable
+	}
+	return confirmation, nil
+}
+
+// confirmOnce is singleflighted per bearer request ID. The database transaction
+// remains the cross-process authority; this layer only prevents a local burst
+// of concurrent userbot retries from issuing duplicate lite-server reads.
+func (s *Service) confirmOnce(ctx context.Context, requestID, walletAddress string, now time.Time) (Confirmation, error) {
 	withdrawal, found, err := s.ledger.ResolveWithdrawal(ctx, requestID)
 	if err != nil {
 		return Confirmation{}, err

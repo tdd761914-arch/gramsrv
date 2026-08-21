@@ -1631,6 +1631,7 @@ func run(logger *zap.Logger) error {
 		GiftWithdrawals:   giftsService,
 		CustomFragment:    customFragmentService,
 		GiftClaim:         giftClaimService,
+		MiniApps:          web.NewMiniAppsHandler(cfg.PublicAppName),
 		ModerationAppeals: moderationService,
 		TelegramLogin:     telegramLoginHTTPHandler,
 	}, logger.Named("public-web")); err != nil {

@@ -152,7 +152,8 @@ WHERE payload=$1 AND user_id=$2 AND consumed_at IS NULL AND expires_at>$3`, payl
 
 func (s *StarGiftClaimStore) CommitClaim(ctx context.Context, req domain.StarGiftOnChainClaim) (domain.StarGiftOnChainClaimResult, error) {
 	if s == nil || s.db == nil || len(req.Payload) != 64 || req.UserID <= 0 || req.UniqueGiftID <= 0 ||
-		strings.TrimSpace(req.WalletAddress) == "" || strings.TrimSpace(req.GiftAddress) == "" || req.ClaimedAt <= 0 {
+		strings.TrimSpace(req.ExpectedPreviousWallet) == "" || strings.TrimSpace(req.WalletAddress) == "" ||
+		strings.TrimSpace(req.GiftAddress) == "" || req.ClaimedAt <= 0 {
 		return domain.StarGiftOnChainClaimResult{}, domain.ErrStarGiftInvalid
 	}
 	var previousWallet, username string
@@ -175,7 +176,7 @@ RETURNING unique_gift_id`, req.Payload, req.UserID, req.ClaimedAt).Scan(&challen
 WHERE id=$1 FOR UPDATE`, req.UniqueGiftID).Scan(&previousWallet, &giftAddress, &burned); err != nil {
 			return err
 		}
-		if burned || previousWallet == "" || giftAddress != req.GiftAddress {
+		if burned || previousWallet == "" || previousWallet != req.ExpectedPreviousWallet || giftAddress != req.GiftAddress {
 			return domain.ErrStarGiftUnavailable
 		}
 		if err := tx.QueryRow(ctx, `SELECT username FROM users WHERE id=$1`, req.UserID).Scan(&username); err != nil {

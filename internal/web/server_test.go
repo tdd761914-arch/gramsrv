@@ -59,6 +59,35 @@ func TestCustomFragmentRoutesDoNotConflictWithUsernameLinks(t *testing.T) {
 	}
 }
 
+func TestLocalMiniAppsUseGramsrvRoutes(t *testing.T) {
+	h, err := NewHandler(Config{
+		StickerSets:   fakeResolver{},
+		PublicBaseURL: "https://links.example.test",
+		MiniApps:      NewMiniAppsHandler("Flashgram"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, target := range []string{"/botfather", "/stickers"} {
+		rr := httptest.NewRecorder()
+		h.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, target, nil))
+		if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), "Gramsrv mini app") || strings.Contains(rr.Body.String(), "telegram.org") ||
+			strings.Contains(rr.Header().Get("Content-Security-Policy"), "https://telegram.org") {
+			t.Fatalf("GET %s status=%d body=%q", target, rr.Code, rr.Body.String())
+		}
+	}
+	validate := httptest.NewRecorder()
+	h.ServeHTTP(validate, httptest.NewRequest(http.MethodPost, "/api/miniapps/botfather/validate", strings.NewReader(`{"token":"123456:AAAAAAAAAAAAAAAAAAAA"}`)))
+	if validate.Code != http.StatusOK || !strings.Contains(validate.Body.String(), `"valid":true`) {
+		t.Fatalf("validate status=%d body=%q", validate.Code, validate.Body.String())
+	}
+	sets := httptest.NewRecorder()
+	h.ServeHTTP(sets, httptest.NewRequest(http.MethodGet, "/api/miniapps/stickers", nil))
+	if sets.Code != http.StatusOK || !strings.Contains(sets.Body.String(), "flashgram") {
+		t.Fatalf("sets status=%d body=%q", sets.Code, sets.Body.String())
+	}
+}
+
 func newTestHandlerWithPublicPeers(
 	t *testing.T,
 	resolver StickerSetResolver,

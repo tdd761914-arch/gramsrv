@@ -215,6 +215,12 @@ func (s *Service) Claim(ctx context.Context, initData string, input ClaimInput, 
 	if !found {
 		return ClaimResponse{}, ErrExpired
 	}
+	expectedPreviousWallet, err := canonicalMainnetAddress(challenge.Unique.OwnerAddress)
+	if err != nil {
+		// A stale or malformed database projection must never be replaced by a
+		// claim. Ownership sync can repair it before the user retries.
+		return ClaimResponse{}, ErrInvalid
+	}
 	walletAddress, err := canonicalMainnetAddress(input.Account.Address)
 	if err != nil {
 		return ClaimResponse{}, ErrInvalid
@@ -237,9 +243,25 @@ func (s *Service) Claim(ctx context.Context, initData string, input ClaimInput, 
 	if err != nil || itemAddress != challenge.Unique.GiftAddress {
 		return ClaimResponse{}, ErrNotOwner
 	}
+	// VerifyMint checks the collection/index/owner tuple. Read the owner once
+	// more immediately before the database CAS so a transfer observed between
+	// the first chain read and the commit fails closed instead of publishing a
+	// stale profile projection. The ownership watcher remains the eventual
+	// repair path for a transfer occurring after this final read.
+	currentOwner, activeCollection, ownerErr := s.verifier.CurrentNFTOwner(
+		ctx, s.collection, big.NewInt(challenge.Unique.ID), itemAddress,
+	)
+	if ownerErr != nil || !activeCollection {
+		return ClaimResponse{}, ErrNotOwner
+	}
+	currentOwner, err = canonicalMainnetAddress(currentOwner)
+	if err != nil || currentOwner != walletAddress {
+		return ClaimResponse{}, ErrNotOwner
+	}
 	result, err := s.store.CommitClaim(ctx, domain.StarGiftOnChainClaim{
 		Payload: input.Payload, UserID: user.ID, UniqueGiftID: challenge.Unique.ID,
-		WalletAddress: walletAddress, GiftAddress: itemAddress, ClaimedAt: int(now.Unix()),
+		ExpectedPreviousWallet: expectedPreviousWallet,
+		WalletAddress:          walletAddress, GiftAddress: itemAddress, ClaimedAt: int(now.Unix()),
 	})
 	if err != nil {
 		return ClaimResponse{}, err

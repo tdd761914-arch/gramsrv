@@ -70,6 +70,12 @@ address with `get_nft_address_by_index`, reads `get_nft_data` through proof-
 checking mainnet lite servers, and atomically marks the gift exported only when
 the index, collection and owner all match.
 
+The claim path uses the same fail-closed compare-and-swap rule: the database
+owner observed when a TON Proof challenge is issued must still be the owner
+when the single-use challenge is committed. A concurrent ownership sync or
+second claim therefore returns a conflict instead of overwriting a newer
+projection.
+
 Public routes:
 
 - `/custom-fragment` — service and collection information;
@@ -81,6 +87,11 @@ Public routes:
   backdrop, tiled pattern, and model rest frame;
 - `/custom-fragment/media/gift/{slug}.lottie.json` — the selected model's raw
   Lottie JSON, cached in memory and suitable for client-side animation.
+
+The public Web listener also exposes `/botfather` and `/stickers` as local
+Telegram-style mini-app shells. They use only relative `/api/miniapps/*`
+requests; the BotFather page validates token syntax locally and intentionally
+does not retain or forward credentials.
 
 The media routes and all metadata URLs use
 `TELESRV_CUSTOM_FRAGMENT_PUBLIC_BASE_URL`, so CustomFragment can live on a
