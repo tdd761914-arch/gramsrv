@@ -18,6 +18,7 @@ import (
 type miniAppBotManagerStub struct {
 	owner   int64
 	created int
+	about   string
 }
 
 func (s *miniAppBotManagerStub) CreateBot(_ context.Context, owner int64, name, username string) (domain.User, string, error) {
@@ -27,6 +28,11 @@ func (s *miniAppBotManagerStub) CreateBot(_ context.Context, owner int64, name, 
 
 func (s *miniAppBotManagerStub) ListOwnedBots(context.Context, int64) ([]domain.User, error) {
 	return []domain.User{{ID: 9001, FirstName: "Demo", Username: "demo_bot"}}, nil
+}
+
+func (s *miniAppBotManagerStub) SetBotInfo(_ context.Context, _ int64, update domain.BotInfoUpdate) (int, error) {
+	s.about = update.About
+	return 2, nil
 }
 
 type miniAppTokenStub struct{}
@@ -78,12 +84,12 @@ func TestMiniAppCreateUsesSignedIdentity(t *testing.T) {
 		StickersToken:  "1063110917:sticker-secret",
 	})
 	initData := miniAppInitDataForTest(t, "93372553:bot-secret", 42)
-	req := httptest.NewRequest(http.MethodPost, "/api/miniapps/botfather/bots", strings.NewReader(`{"name":"My Bot","username":"my_bot"}`))
+	req := httptest.NewRequest(http.MethodPost, "/api/miniapps/botfather/bots", strings.NewReader(`{"name":"My Bot","about":"Local Gramsrv bot","username":"my_bot"}`))
 	req.Header.Set("X-Telegram-Init-Data", initData)
 	res := httptest.NewRecorder()
 	h.ServeHTTP(res, req)
-	if res.Code != http.StatusCreated || bots.owner != 42 || bots.created != 1 {
-		t.Fatalf("create bot status=%d owner=%d calls=%d body=%s", res.Code, bots.owner, bots.created, res.Body.String())
+	if res.Code != http.StatusCreated || bots.owner != 42 || bots.created != 1 || bots.about != "Local Gramsrv bot" {
+		t.Fatalf("create bot status=%d owner=%d calls=%d about=%q body=%s", res.Code, bots.owner, bots.created, bots.about, res.Body.String())
 	}
 	var body map[string]any
 	if err := json.Unmarshal(res.Body.Bytes(), &body); err != nil || body["token"] != "9001:created-secret" {

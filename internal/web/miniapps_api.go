@@ -40,6 +40,10 @@ type MiniAppBotManager interface {
 	ListOwnedBots(ctx context.Context, ownerUserID int64) ([]domain.User, error)
 }
 
+type miniAppBotInfoManager interface {
+	SetBotInfo(ctx context.Context, botUserID int64, update domain.BotInfoUpdate) (int, error)
+}
+
 type MiniAppStickerManager interface {
 	ListStickerSets(ctx context.Context, kind domain.StickerSetKind) ([]domain.StickerSet, error)
 	ResolveStickerSet(ctx context.Context, ref domain.StickerSetRef) (domain.StickerSet, []domain.Document, bool, error)
@@ -218,9 +222,15 @@ func (m *MiniApps) createBot(w http.ResponseWriter, r *http.Request) {
 	}
 	var input struct {
 		Name     string `json:"name"`
+		About    string `json:"about"`
 		Username string `json:"username"`
 	}
 	if !decodeMiniJSON(w, r, 4<<10, &input) {
+		return
+	}
+	input.About = strings.TrimSpace(input.About)
+	if utf8.RuneCountInString(input.About) > domain.MaxBotAboutLen {
+		writeMiniAPIError(w, http.StatusBadRequest, "about text must be 120 characters or fewer")
 		return
 	}
 	bot, token, err := m.bots.CreateBot(r.Context(), user.ID, input.Name, input.Username)
@@ -228,13 +238,30 @@ func (m *MiniApps) createBot(w http.ResponseWriter, r *http.Request) {
 		writeMiniAPIError(w, miniServiceErrorStatus(err), miniServiceErrorMessage(err))
 		return
 	}
+	warnings := make([]string, 0, 1)
+	if input.About != "" {
+		info, ok := m.bots.(miniAppBotInfoManager)
+		if !ok {
+			warnings = append(warnings, "Bot was created, but about text is not supported by this Gramsrv configuration.")
+		} else if _, err := info.SetBotInfo(r.Context(), bot.ID, domain.BotInfoUpdate{SetAbout: true, About: input.About}); err != nil {
+			// Creation has already committed and the token cannot safely be hidden
+			// from the caller. Return it once together with an actionable warning.
+			warnings = append(warnings, "Bot was created, but its about text could not be saved.")
+		} else {
+			bot.About = input.About
+		}
+	}
 	// This is the only response that contains the newly generated token. It is
 	// deliberately not persisted in a browser session or included in list APIs.
 	w.Header().Set("Cache-Control", "no-store")
-	writeMiniJSON(w, http.StatusCreated, map[string]any{
+	response := map[string]any{
 		"bot":   miniBotView{ID: bot.ID, Username: bot.Username, Name: bot.FirstName, LastName: bot.LastName},
 		"token": token,
-	})
+	}
+	if len(warnings) != 0 {
+		response["warnings"] = warnings
+	}
+	writeMiniJSON(w, http.StatusCreated, response)
 }
 
 func (m *MiniApps) listMyStickerSets(w http.ResponseWriter, r *http.Request) {
