@@ -1,1 +1,0 @@
-DROP INDEX IF EXISTS welcome_message_deliveries_target_idx;

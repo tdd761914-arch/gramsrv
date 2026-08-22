@@ -1,3 +1,4 @@
+-- Renumbered after the Flashgram 0176-0177 migrations during upstream integration.
 -- Isolate poisoned suggested-post lifecycle rows from the global due queue.
 -- A failed aggregate remains durable and retryable, but receives a bounded
 -- backoff so it cannot monopolize every one-second dispatcher pass.

@@ -1,3 +1,4 @@
+-- Renumbered after the Flashgram 0176-0177 migrations during upstream integration.
 CREATE TABLE welcome_message_peers (
     channel_id bigint PRIMARY KEY REFERENCES channels(id) ON DELETE CASCADE,
     next_id integer NOT NULL DEFAULT 1,

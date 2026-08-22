@@ -1,13 +1,4 @@
--- Human account deletion is a logical user tombstone.  The deleted user keeps
--- all relationship/history rows, so the users UPDATE must not fan out through
--- every reverse contact, dialog and channel membership.  A dedicated event
--- invalidates the base-user and RPC projection caches as one coarse boundary.
-
--- Collectible phone ownership is an account asset, not the editable users.phone
--- identity field.  Logical deletion preserves it; physical user deletion keeps
--- the separate 0171 release trigger.
-DROP TRIGGER IF EXISTS users_release_collectible_phone_on_soft_delete ON public.users;
-
+-- Renumbered after the Flashgram 0176-0177 migrations during upstream integration.
 CREATE OR REPLACE FUNCTION public.telesrv_notify_user_base_read_model() RETURNS trigger
     LANGUAGE plpgsql
     AS $$
@@ -15,13 +6,6 @@ DECLARE
     changed_id BIGINT;
     projection_changed BOOLEAN;
 BEGIN
-    IF TG_OP = 'UPDATE'
-       AND OLD.deleted_at IS NULL
-       AND NEW.deleted_at IS NOT NULL THEN
-        PERFORM telesrv_bump_read_model_version('user_deleted', NEW.id, 'user', NEW.id);
-        RETURN NULL;
-    END IF;
-
     IF TG_OP = 'DELETE' THEN
         changed_id := OLD.id;
         projection_changed := true;
@@ -77,12 +61,6 @@ DECLARE
     old_id BIGINT;
     projection_changed BOOLEAN;
 BEGIN
-    IF TG_OP = 'UPDATE'
-       AND OLD.deleted_at IS NULL
-       AND NEW.deleted_at IS NOT NULL THEN
-        RETURN NULL;
-    END IF;
-
     IF TG_OP = 'DELETE' THEN
         changed_id := OLD.id;
         projection_changed := true;
@@ -127,3 +105,9 @@ BEGIN
     RETURN NULL;
 END;
 $$;
+
+DROP TRIGGER IF EXISTS users_release_collectible_phone_on_soft_delete ON public.users;
+CREATE TRIGGER users_release_collectible_phone_on_soft_delete
+BEFORE UPDATE OF deleted_at ON public.users
+FOR EACH ROW WHEN (OLD.deleted_at IS NULL AND NEW.deleted_at IS NOT NULL)
+EXECUTE FUNCTION public.release_soft_deleted_user_collectible_phone();

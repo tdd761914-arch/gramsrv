@@ -1,3 +1,4 @@
+-- Renumbered after the Flashgram 0176-0177 migrations during upstream integration.
 -- system_key is the constructor-routing identity for global sticker sets. More
 -- than one row makes messages.getStickerSet/inputStickerSet* nondeterministic
 -- and can alternate clients between different catalogs after a restart.

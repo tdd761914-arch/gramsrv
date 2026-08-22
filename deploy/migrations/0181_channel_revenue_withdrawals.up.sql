@@ -1,3 +1,4 @@
+-- Renumbered after the Flashgram 0176-0177 migrations during upstream integration.
 -- Local, creator-claimed channel revenue withdrawals. The public confirmation
 -- URL is a bearer capability; only its SHA-256 digest is persisted.
 CREATE TABLE public.channel_revenue_withdrawals (

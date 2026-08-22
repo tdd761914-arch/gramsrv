@@ -1,3 +1,4 @@
+-- Renumbered after the Flashgram 0176-0177 migrations during upstream integration.
 DROP TRIGGER IF EXISTS channel_messages_suggested_post_lifecycle_wakeup ON public.channel_messages;
 DROP FUNCTION IF EXISTS public.telesrv_wake_suggested_post_lifecycle_on_delete();
 

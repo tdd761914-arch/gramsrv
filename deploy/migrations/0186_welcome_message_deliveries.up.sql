@@ -1,3 +1,4 @@
+-- Renumbered after the Flashgram 0176-0177 migrations during upstream integration.
 CREATE SEQUENCE welcome_message_join_event_id_seq AS bigint;
 
 CREATE TABLE welcome_message_deliveries (

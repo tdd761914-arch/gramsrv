@@ -1,3 +1,4 @@
+-- Renumbered after the Flashgram 0176-0177 migrations during upstream integration.
 DROP INDEX IF EXISTS public.sticker_sets_system_key_idx;
 
 CREATE INDEX sticker_sets_system_key_idx

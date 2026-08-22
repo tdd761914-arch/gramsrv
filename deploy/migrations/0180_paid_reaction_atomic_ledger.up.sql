@@ -1,3 +1,4 @@
+-- Renumbered after the Flashgram 0176-0177 migrations during upstream integration.
 -- Durable idempotency command and first-settlement receipt for
 -- messages.sendPaidReaction.
 CREATE TABLE public.channel_paid_reaction_commands (

@@ -1,3 +1,4 @@
+-- Renumbered after the Flashgram 0176-0177 migrations during upstream integration.
 -- A completed claim moved value into a creator's personal ledger and its
 -- receipt is the only exact rollback evidence. Never discard that evidence or
 -- let 0178 subtract legacy revenue after a payout; restore from backup instead.

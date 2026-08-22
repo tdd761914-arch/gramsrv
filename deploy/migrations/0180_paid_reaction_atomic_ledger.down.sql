@@ -1,3 +1,4 @@
+-- Renumbered after the Flashgram 0176-0177 migrations during upstream integration.
 -- New-path channel reaction transactions outlive the bounded random_id command
 -- receipts. Once any exists, an old binary could debit the payer again while
 -- no longer crediting the channel. Never discard that cutover boundary; use a
