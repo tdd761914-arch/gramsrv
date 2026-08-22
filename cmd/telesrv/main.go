@@ -64,6 +64,7 @@ import (
 	"telesrv/internal/app/userprojection"
 	"telesrv/internal/app/users"
 	verificationapp "telesrv/internal/app/verification"
+	welcomemessagesapp "telesrv/internal/app/welcomemessages"
 	"telesrv/internal/botapi"
 	"telesrv/internal/branding"
 	"telesrv/internal/config"
@@ -128,6 +129,17 @@ func newLogger() (*zap.Logger, error) {
 		zap.AddStacktrace(zapcore.ErrorLevel),
 		zap.ErrorOutput(zapcore.AddSync(os.Stderr)),
 	), nil
+}
+
+func localStarGiftWithdrawalOption(publicBaseURL, publicLinkWebAddr string) (stargifts.Option, error) {
+	if strings.TrimSpace(publicLinkWebAddr) == "" {
+		return nil, nil
+	}
+	provider, err := stargifts.NewLocalWithdrawalProvider(publicBaseURL)
+	if err != nil {
+		return nil, err
+	}
+	return stargifts.WithWithdrawalProvider(provider), nil
 }
 
 func newBusinessAutomationOptions(cfg config.Config, online messageapp.BusinessAutomationOnlineChecker, generator messageapp.BusinessAITextGenerator, logger *zap.Logger) []messageapp.BusinessAutomationOption {
@@ -671,7 +683,8 @@ func run(logger *zap.Logger) error {
 	if cfg.TelegramLoginEnabled {
 		telegramLoginHTTPHandler, err = telegramloginhttp.NewHandler(telegramloginhttp.Config{
 			Service: telegramLoginService, Tokens: telegramLoginIDTokens,
-			Limiter: redisstore.NewRateLimiter(rdb), AppName: cfg.PublicAppName,
+			BotUsernames: postgres.NewUserStore(pool),
+			Limiter:      redisstore.NewRateLimiter(rdb), AppName: cfg.PublicAppName,
 			Logger: logger.Named("telegram-login-http"), TrustedProxyCIDRs: cfg.TelegramLoginTrustedProxyCIDRs,
 			AllowHTTP: cfg.TelegramLoginAllowHTTP,
 		})
@@ -698,6 +711,7 @@ func run(logger *zap.Logger) error {
 	botCallbackStore := redisstore.NewBotCallbackRegistryStore(rdb)
 	ephemeralStore := redisstore.NewEphemeralMessageStore(rdb)
 	ephemeralReportStore := postgres.NewEphemeralReportStore(pool)
+	welcomeMessageStore := postgres.NewWelcomeMessageStore(pool)
 	moderationReportStore := postgres.NewModerationReportStore(pool)
 	authDeliveryReportStore := postgres.NewAuthDeliveryReportStore(pool)
 	clientTelemetryStore := postgres.NewClientTelemetryStore(pool)
@@ -720,6 +734,7 @@ func run(logger *zap.Logger) error {
 	channelBoostCache := postgres.NewChannelBoostCache(cfg.ChannelBoostCacheMaxEntries, cfg.ChannelBoostCacheTTL)
 	channelStore := postgres.NewChannelStore(pool,
 		postgres.WithChannelAllocators(channelIDAllocator, channelMessageIDAllocator),
+		postgres.WithChannelStarsStartingGrant(cfg.StarsStartingGrant),
 		postgres.WithChannelLogger(logger.Named("store").Named("channels")),
 		postgres.WithChannelRowCache(channelRowCache),
 		postgres.WithChannelMemberCache(channelMemberCache),
@@ -1100,17 +1115,27 @@ func run(logger *zap.Logger) error {
 			StarsProceedsPermille: cfg.StarGiftStarsProceedsPermille,
 			TONProceedsPermille:   cfg.StarGiftTONProceedsPermille,
 		}))
-	starGiftWithdrawalProvider, err := stargifts.NewLocalWithdrawalProvider(cfg.PublicBaseURL)
+	var starGiftWithdrawalOption stargifts.Option
 	if cfg.CustomFragmentEnabled {
-		starGiftWithdrawalProvider, err = stargifts.NewCustomFragmentWithdrawalProvider(cfg.CustomFragmentPublicBaseURL)
+		starGiftWithdrawalProvider, providerErr := stargifts.NewCustomFragmentWithdrawalProvider(cfg.CustomFragmentPublicBaseURL)
+		if providerErr != nil {
+			return fmt.Errorf("init CustomFragment star gift withdrawal provider: %w", providerErr)
+		}
+		starGiftWithdrawalOption = stargifts.WithWithdrawalProvider(starGiftWithdrawalProvider)
+	} else {
+		starGiftWithdrawalOption, err = localStarGiftWithdrawalOption(cfg.PublicBaseURL, cfg.PublicLinkWebAddr)
 	}
 	if err != nil {
-		return fmt.Errorf("init star gift withdrawal provider: %w", err)
+		return fmt.Errorf("init local star gift withdrawal provider: %w", err)
 	}
-	giftsService := stargifts.NewService(starGiftStore, blobBackend, cfg.DC,
+	starGiftOptions := []stargifts.Option{
 		stargifts.WithUpgradeStore(starGiftUpgradeStore),
 		stargifts.WithLifecycleStore(starGiftLifecycleStore),
-		stargifts.WithWithdrawalProvider(starGiftWithdrawalProvider))
+	}
+	if starGiftWithdrawalOption != nil {
+		starGiftOptions = append(starGiftOptions, starGiftWithdrawalOption)
+	}
+	giftsService := stargifts.NewService(starGiftStore, blobBackend, cfg.DC, starGiftOptions...)
 	var customFragmentService *customfragment.Service
 	if cfg.CustomFragmentEnabled {
 		customFragmentService, err = customfragment.New(customfragment.Config{
@@ -1188,6 +1213,7 @@ func run(logger *zap.Logger) error {
 	)
 	communitiesService := communitiesapp.NewService(communityStore)
 	ephemeralService := ephemeralapp.NewService(ephemeralStore, channelsService, usersService, botsService)
+	welcomeMessageService := welcomemessagesapp.NewService(welcomeMessageStore, channelsService)
 	storiesService := storiesapp.NewService(storyStore, storiesapp.WithChannelStoryAccess(channelsService))
 	chatlistsService := chatlistsapp.NewService(
 		chatlistStore,
@@ -1374,6 +1400,7 @@ func run(logger *zap.Logger) error {
 		AICompose:               aiComposeService,
 		Ephemeral:               ephemeralService,
 		EphemeralPush:           ephemeralStore,
+		WelcomeMessages:         welcomeMessageService,
 		Moderation:              moderationService,
 		Users:                   usersService,
 		Usernames:               usernamesService,
@@ -1532,7 +1559,9 @@ func run(logger *zap.Logger) error {
 		MaterializeBatch: cfg.BroadcastMaterializeBatch,
 		DeliveryBatch:    cfg.BroadcastDeliveryBatch,
 	}, logger.Named("broadcast").Named("delivery")).Run(ctx)
-	moderationActionOptions := []moderationapp.ActionExecutorOption{}
+	moderationActionOptions := []moderationapp.ActionExecutorOption{
+		moderationapp.WithAccountDeletionNotifier(router),
+	}
 	if cfg.PublicLinkWebAddr != "" {
 		moderationActionOptions = append(
 			moderationActionOptions,
@@ -1561,6 +1590,7 @@ func run(logger *zap.Logger) error {
 		rpc.WithOutboxUpdateBuilder(router.BuildOutboxUpdates),
 	).Run(ctx)
 	go rpc.NewBootstrapUpdateDispatcher(router, logger.Named("rpc").Named("bootstrap")).Run(ctx)
+	go rpc.NewWelcomeDeliveryDispatcher(router, welcomeMessageStore, logger.Named("rpc").Named("welcome-delivery")).Run(ctx)
 	go rpc.NewScheduledDispatcher(router, logger.Named("rpc").Named("scheduled")).Run(ctx)
 	go rpc.NewSuggestedPostDispatcher(router, logger.Named("rpc").Named("suggested-post")).Run(ctx)
 	go rpc.NewExpiryDispatcher(router, logger.Named("rpc").Named("expiry")).Run(ctx)
@@ -1626,21 +1656,22 @@ func run(logger *zap.Logger) error {
 		return fmt.Errorf("start admin api: %w", err)
 	}
 	if _, err := web.Start(ctx, web.Config{
-		Addr:            cfg.PublicLinkWebAddr,
-		PublicBaseURL:   cfg.PublicBaseURL,
-		AppScheme:       cfg.PublicAppScheme,
-		AppLinkBase:     cfg.PublicAppLinkBase,
-		WebBaseURL:      cfg.PublicWebBaseURL,
-		AppName:         cfg.PublicAppName,
-		StickerSets:     filesService,
-		Users:           userStore,
-		Channels:        channelStore,
-		Privacy:         privacyService,
-		Photos:          filesService,
-		UniqueGifts:     giftsService,
-		GiftWithdrawals: giftsService,
-		CustomFragment:  customFragmentService,
-		GiftClaim:       giftClaimService,
+		Addr:               cfg.PublicLinkWebAddr,
+		PublicBaseURL:      cfg.PublicBaseURL,
+		AppScheme:          cfg.PublicAppScheme,
+		AppLinkBase:        cfg.PublicAppLinkBase,
+		WebBaseURL:         cfg.PublicWebBaseURL,
+		AppName:            cfg.PublicAppName,
+		StickerSets:        filesService,
+		Users:              userStore,
+		Channels:           channelStore,
+		Privacy:            privacyService,
+		Photos:             filesService,
+		UniqueGifts:        giftsService,
+		GiftWithdrawals:    giftsService,
+		RevenueWithdrawals: giftsService,
+		CustomFragment:     customFragmentService,
+		GiftClaim:          giftClaimService,
 		MiniApps: web.NewConfiguredMiniAppsHandler(web.MiniAppsConfig{
 			AppName:  cfg.PublicAppName,
 			Bots:     botsService,

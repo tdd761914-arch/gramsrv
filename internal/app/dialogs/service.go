@@ -842,7 +842,13 @@ func (s *Service) attachDrafts(ctx context.Context, userID int64, list *domain.D
 	if s == nil || s.dialogs == nil || userID == 0 || list == nil || len(list.Dialogs) == 0 {
 		return nil
 	}
-	drafts, err := s.dialogs.ListDrafts(ctx, userID, domain.MaxDialogDraftsPerUser)
+	peers := make([]domain.Peer, 0, len(list.Dialogs))
+	for _, dialog := range list.Dialogs {
+		if dialog.Peer.ID != 0 {
+			peers = append(peers, dialog.Peer)
+		}
+	}
+	drafts, err := s.dialogs.ListDraftsByPeers(ctx, userID, peers)
 	if err != nil {
 		return err
 	}
@@ -1002,7 +1008,8 @@ func writeDraftRichHash(h interface{ Write([]byte) (int, error) }, buf []byte, r
 	binary.LittleEndian.PutUint64(buf[2:10], uint64(len(rich.Blocks)))
 	binary.LittleEndian.PutUint64(buf[10:18], uint64(len(rich.Photos)))
 	binary.LittleEndian.PutUint64(buf[18:26], uint64(len(rich.Documents)))
-	_, _ = h.Write(buf[:26])
+	binary.LittleEndian.PutUint64(buf[26:34], uint64(rich.EffectiveBlocksLayer()))
+	_, _ = h.Write(buf[:34])
 	_, _ = h.Write(rich.Blocks)
 	for _, photo := range rich.Photos {
 		binary.LittleEndian.PutUint64(buf[:8], uint64(photo.ID))

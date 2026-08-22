@@ -1,5 +1,9 @@
 # telesrv configuration reference
 
+> Status: operation.
+> Scope: Configuration reference.
+
+
 Chinese version: [configuration.zh-CN.md](configuration.zh-CN.md)
 
 This document describes every setting loaded by `internal/config`. Defaults and validation behavior in `internal/config/config.go` are authoritative. All settings require a process restart; telesrv does not hot-reload configuration.
@@ -84,7 +88,7 @@ Retained typed graphs remain charged to the RPC scheduler budget above.
 | `TELESRV_PUBLIC_APP_LINK_BASE` | nullable custom URL base / empty | Optional host-based root for multi-server clients, for example `owpg://example.com`. When set, links use `owpg://example.com/oauth`, `owpg://example.com/<username>`, and equivalent route paths. Only exact `<custom-scheme>://<host>` values are accepted; ports, paths, queries, and fragments are rejected. `TELESRV_PUBLIC_APP_SCHEME` remains an accepted legacy input. |
 | `TELESRV_PUBLIC_WEB_BASE_URL` | HTTP(S) URL / `https://weba.telesrv.net` | Web-client root used by public username pages. Same URL validation as `TELESRV_PUBLIC_BASE_URL`. |
 | `TELESRV_PUBLIC_APP_NAME` | string / `TELESRV_BRAND_PRODUCT_NAME` | Public landing-page product name; trimmed, non-empty, no control characters, maximum 64 Unicode characters. |
-| `TELESRV_PUBLIC_LINK_WEB_ADDR` | nullable address / empty | Username/avatar/sticker/emoji/chatlist/collectible-gift landing pages plus the hash-only moderation appeal form. Empty disables it. Production should bind loopback behind exact nginx routes. Moderation `freeze_account` actions fail closed when this listener is disabled because telesrv cannot issue a reachable appeal URL. `.env.example` enables `127.0.0.1:2401` for development. |
+| `TELESRV_PUBLIC_LINK_WEB_ADDR` | nullable address / empty | Username/avatar/sticker/emoji/chatlist/collectible-gift landing pages, the hash-only moderation appeal form, and short-lived unique-gift/channel-revenue confirmation pages. Empty disables the listener; moderation `freeze_account` actions, local gift export, and channel revenue withdrawal then fail closed because telesrv cannot issue a reachable confirmation URL. Public landing pages remain read-only; only exact bearer-token POST routes can commit their aggregate. Production should bind loopback behind exact nginx routes with token-route access logs disabled. `.env.example` enables `127.0.0.1:2401` for development. |
 | `TELESRV_MINIAPP_BOTFATHER_TOKEN` | `<93372553>:<35-char-secret>` / empty | Server-only token secret used to sign and verify the local BotFather Mini App. When set, it is written to the built-in BotFather row before RPC/Web services start; it is never rendered in HTML or returned by list APIs. |
 | `TELESRV_MINIAPP_STICKERS_TOKEN` | `<1063110917>:<35-char-secret>` / empty | Server-only token secret used to sign and verify the local Stickers Mini App. A 35-character secret is required for state-changing requests; empty keeps the app unavailable rather than accepting forgeable init data. |
 | `TELESRV_CUSTOM_FRAGMENT_ENABLE` | bool / `false` | Enable the self-hosted TON mainnet gift withdrawal flow and its CustomFragment routes. Requires the public Web listener and a configured collection/signing key. |
@@ -284,12 +288,14 @@ parties. Start or restart `telesrv`, then verify the public endpoints:
 curl.exe http://192.0.2.25:2401/.well-known/openid-configuration
 curl.exe http://192.0.2.25:2401/.well-known/jwks.json
 curl.exe -I http://192.0.2.25:2401/js/telegram-login.js
+curl.exe -I 'http://192.0.2.25:2401/js/telegram-widget.js?23'
 ```
 
 The discovery `issuer` must equal the configured value, and its `authorization_endpoint`,
 `token_endpoint`, and `jwks_uri` must be reachable by the relying party. A reverse proxy must pass
 through `/.well-known/openid-configuration`, `/.well-known/jwks.json`, `/auth`, `/auth/status`,
-`/token`, `/crossapp`, `/inapp`, `/telegram-login.js`, and `/js/telegram-login.js` unchanged.
+`/token`, `/crossapp`, `/inapp`, `/telegram-login.js`, `/js/telegram-login.js`,
+`/telegram-widget.js`, `/js/telegram-widget.js`, and `POST /telegram-widget/resolve` unchanged.
 
 #### 3. Create an OIDC Client with the local `@BotFather`
 
@@ -353,6 +359,37 @@ Supported scopes are `openid`, `profile`, `phone`, and `telegram:bot_access`. Th
 currently expose UserInfo, refresh tokens, or an introspection endpoint. Browser applications may
 load `<issuer>/js/telegram-login.js` for the local JS SDK. A Client Secret must remain server-side.
 
+For an existing frontend that uses Telegram's attribute-based Login Widget, replace only the widget
+script source; do not use `https://telegram.org/js/telegram-widget.js` for a bot that exists only in
+telesrv:
+
+```html
+<script async src="https://<telesrv-issuer>/js/telegram-widget.js?23"
+  data-telegram-login="BotName"
+  data-size="large"
+  data-radius="10"
+  data-request-access="write"
+  data-lang="en"
+  data-onauth="onTelegramAuth(result)"></script>
+<script>
+  function onTelegramAuth(result) {
+    // telesrv SDK result: { id_token, user }, or { error }
+  }
+</script>
+```
+
+`data-client-id="<numeric bot user id>"` is preferred when supplied. With only
+`data-telegram-login`, the shim resolves the current local bot username only if its Login client is
+enabled and the browser's exact Origin is registered for that bot. `data-size` and `data-radius`
+style the simple local button, `data-lang` is forwarded to the Login SDK, and
+`data-request-access="write"` requests `openid profile telegram:bot_access`; without it the shim
+requests `openid profile`. The `data-onauth` callback receives the existing telesrv SDK result
+`{id_token, user}` rather than a fabricated official-widget payload.
+
+Mini Apps are a separate surface and must continue to load the official
+`https://telegram.org/js/telegram-web-app.js`. The telesrv `telegram-widget.js` shim does not replace
+the Mini App script or alter Mini App behavior.
+
 #### 5. Verify the complete path with the Bedolaga demo
 
 Install the demo dependencies:
@@ -404,7 +441,7 @@ key rings independently on different instances.
 
 | Setting | Type / code default | Description and constraints |
 |---|---|---|
-| `TELESRV_POSTGRES_DSN` | secret DSN / `postgres://telesrv:telesrv@127.0.0.1:5432/telesrv?sslmode=disable` | Primary durable business database. Production must replace the development credentials and TLS policy. |
+| `TELESRV_POSTGRES_DSN` | secret DSN / `postgres://telesrv:telesrv@127.0.0.1:5432/telesrv_main?sslmode=disable` | Primary durable business database. Local `main` and `v2` use separate `telesrv_main` / `telesrv_v2` databases because their migration histories differ. Production must replace the development credentials and TLS policy. |
 | `TELESRV_POSTGRES_MAX_CONNS` | int / `50` | pgxpool maximum connections. `<=0` delegates to pgx defaults, which are usually too small for production outbox/RPC concurrency. |
 | `TELESRV_POSTGRES_MIN_CONNS` | int / `16` | pgxpool pre-warmed minimum connections. |
 | `TELESRV_REDIS_ADDR` | address / `127.0.0.1:6399` | Redis used for volatile codes, limits, and shared update/cache state. |

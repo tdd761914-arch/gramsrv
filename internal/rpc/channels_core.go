@@ -188,6 +188,9 @@ func (r *Router) onChannelsGetFullChannel(ctx context.Context, input tg.InputCha
 			return nil, channelInvalidErr(domain.ErrChannelPrivate)
 		}
 		full := cached.full
+		if err := r.applyWelcomeMessagesToFullChat(ctx, ref.ID, &full); err != nil {
+			return nil, err
+		}
 		if err := r.applyTranslationDisabledToChannelFull(ctx, userID, ref.ID, &full); err != nil {
 			return nil, err
 		}
@@ -240,6 +243,9 @@ func (r *Router) onChannelsGetFullChannel(ctx context.Context, input tg.InputCha
 		chats:         append([]tg.ChatClass(nil), chats...),
 		userIDs:       userIDs,
 	}, loadEpoch)
+	if err := r.applyWelcomeMessagesToFullChat(ctx, view.Channel.ID, full); err != nil {
+		return nil, err
+	}
 	if err := r.applyTranslationDisabledToChannelFull(ctx, userID, view.Channel.ID, full); err != nil {
 		return nil, err
 	}
@@ -256,6 +262,23 @@ func (r *Router) onChannelsGetFullChannel(ctx context.Context, input tg.InputCha
 		Chats:    chats,
 		Users:    users,
 	}, nil
+}
+
+func (r *Router) applyWelcomeMessagesToFullChat(ctx context.Context, channelID int64, full tg.ChatFullClass) error {
+	if r.deps.WelcomeMessages == nil || channelID <= 0 || full == nil {
+		return nil
+	}
+	hasAny, err := r.deps.WelcomeMessages.HasAny(ctx, domain.Peer{Type: domain.PeerTypeChannel, ID: channelID})
+	if err != nil {
+		return internalErr()
+	}
+	switch value := full.(type) {
+	case *tg.ChannelFull:
+		value.HasWelcomeMessages = hasAny
+	case *tg.ChatFull:
+		value.HasWelcomeMessages = hasAny
+	}
+	return nil
 }
 
 func (r *Router) applyStarGiftsCountToChannelFull(ctx context.Context, channelID int64, full *tg.ChannelFull) {
@@ -323,27 +346,48 @@ func (r *Router) onChannelsGetSendAs(ctx context.Context, req *tg.ChannelsGetSen
 			}
 		}
 		chats = []tg.ChatClass{tgChannelChatForView(userID, view)}
-		// 以「当前频道/群本身」发言：广播频道自帖、匿名管理员等（canCurrentChannelSendAs 判定）。
-		if canCurrentChannelSendAs(view) {
-			peers = append(peers, tg.SendAsPeer{Peer: &tg.PeerChannel{ChannelID: view.Channel.ID}})
-		}
-		// 以「用户自己拥有的其它广播频道」身份在本群发言。非本群关联频道的个人频道需会员
-		// （premium_required，对齐官方：仅本群的 linked 讨论频道免会员），客户端据此置灰/引导开会员，
-		// 服务端在发送侧用 PremiumActiveAt 兜底门控。
-		if owned, err := r.deps.Channels.ListSendAsChannels(ctx, userID); err == nil && len(owned) > 0 {
-			extras := make([]domain.Channel, 0, len(owned))
+		owned, ownedErr := r.deps.Channels.ListSendAsChannels(ctx, userID)
+		if req.ForPaidReactions {
+			// Paid reaction identities are self plus currently owned/postable
+			// broadcast channels. They are not message send-as candidates and do
+			// not carry the unrelated premium_required gate.
+			seen := make(map[int64]struct{}, len(owned))
 			for _, ch := range owned {
-				if ch.ID == 0 || ch.ID == view.Channel.ID {
+				if ch.ID == 0 || ch.Deleted || !ch.Broadcast || ch.CreatorUserID != userID {
 					continue
 				}
-				sendAs := tg.SendAsPeer{Peer: &tg.PeerChannel{ChannelID: ch.ID}}
-				if ch.ID != view.Channel.LinkedChatID {
-					sendAs.PremiumRequired = true
+				if _, ok := seen[ch.ID]; ok {
+					continue
 				}
-				peers = append(peers, sendAs)
-				extras = append(extras, ch)
+				seen[ch.ID] = struct{}{}
+				peers = append(peers, tg.SendAsPeer{Peer: &tg.PeerChannel{ChannelID: ch.ID}})
+				if ch.ID != view.Channel.ID {
+					chats = append(chats, tgChannels(userID, []domain.Channel{ch})...)
+				}
 			}
-			chats = append(chats, tgChannels(userID, extras)...)
+		} else {
+			// 以「当前频道/群本身」发言：广播频道自帖、匿名管理员等（canCurrentChannelSendAs 判定）。
+			if canCurrentChannelSendAs(view) {
+				peers = append(peers, tg.SendAsPeer{Peer: &tg.PeerChannel{ChannelID: view.Channel.ID}})
+			}
+			// 以「用户自己拥有的其它广播频道」身份在本群发言。非本群关联频道的个人频道需会员
+			// （premium_required，对齐官方：仅本群的 linked 讨论频道免会员），客户端据此置灰/引导开会员，
+			// 服务端在发送侧用 PremiumActiveAt 兜底门控。
+			if ownedErr == nil && len(owned) > 0 {
+				extras := make([]domain.Channel, 0, len(owned))
+				for _, ch := range owned {
+					if ch.ID == 0 || ch.ID == view.Channel.ID {
+						continue
+					}
+					sendAs := tg.SendAsPeer{Peer: &tg.PeerChannel{ChannelID: ch.ID}}
+					if ch.ID != view.Channel.LinkedChatID {
+						sendAs.PremiumRequired = true
+					}
+					peers = append(peers, sendAs)
+					extras = append(extras, ch)
+				}
+				chats = append(chats, tgChannels(userID, extras)...)
+			}
 		}
 	}
 	out := &tg.ChannelsSendAsPeers{

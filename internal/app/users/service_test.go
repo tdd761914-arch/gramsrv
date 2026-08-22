@@ -8,8 +8,31 @@ import (
 
 	privacyapp "telesrv/internal/app/privacy"
 	"telesrv/internal/domain"
+	"telesrv/internal/store"
 	"telesrv/internal/store/memory"
 )
+
+type resolvePhoneCollectibleStore struct {
+	store.CollectiblePhoneStore
+	asset domain.CollectiblePhone
+}
+
+func (s resolvePhoneCollectibleStore) CollectiblePhone(_ context.Context, phone string) (domain.CollectiblePhone, error) {
+	if phone == s.asset.Phone {
+		return s.asset, nil
+	}
+	return domain.CollectiblePhone{}, domain.ErrCollectiblePhoneNotFound
+}
+
+func (s resolvePhoneCollectibleStore) OwnedCollectiblePhones(_ context.Context, userIDs []int64) (map[int64]domain.CollectiblePhone, error) {
+	out := make(map[int64]domain.CollectiblePhone)
+	for _, userID := range userIDs {
+		if userID == s.asset.OwnerUserID {
+			out[userID] = s.asset
+		}
+	}
+	return out, nil
+}
 
 func TestServiceUsernameLifecycle(t *testing.T) {
 	ctx := context.Background()
@@ -89,6 +112,67 @@ func TestServiceUsernameLifecycle(t *testing.T) {
 	}
 }
 
+func TestByIDsForViewersRejectsOwnerSetAboveBound(t *testing.T) {
+	svc := NewService(memory.NewUserStore())
+	ids := make([]int64, maxBatchUsers+1)
+	for i := range ids {
+		ids[i] = int64(i + 1)
+	}
+	if _, err := svc.ByIDsForViewers(context.Background(), []int64{1}, ids); !errors.Is(err, ErrBatchUsersLimit) {
+		t.Fatalf("ByIDsForViewers err = %v, want ErrBatchUsersLimit", err)
+	}
+}
+
+func TestByIDsRejectsOwnerSetAboveBoundInsteadOfTruncating(t *testing.T) {
+	svc := NewService(memory.NewUserStore())
+	ids := make([]int64, maxBatchUsers+1)
+	for i := range ids {
+		ids[i] = int64(i + 1)
+	}
+	if _, err := svc.ByIDs(context.Background(), 1, ids); !errors.Is(err, ErrBatchUsersLimit) {
+		t.Fatalf("ByIDs err = %v, want ErrBatchUsersLimit", err)
+	}
+}
+
+func TestPrivacyBaseUsersRejectsViewerSetAboveBoundInsteadOfNegativeCachingTruncation(t *testing.T) {
+	svc := NewService(memory.NewUserStore())
+	ids := make([]int64, maxBatchUsers+1)
+	for i := range ids {
+		ids[i] = int64(i + 1)
+	}
+	if _, err := svc.PrivacyBaseUsers(context.Background(), ids); !errors.Is(err, ErrBatchUsersLimit) {
+		t.Fatalf("PrivacyBaseUsers err = %v, want ErrBatchUsersLimit", err)
+	}
+}
+
+func TestByIDsForViewersRejectsDenseCellSetAboveBound(t *testing.T) {
+	svc := NewService(memory.NewUserStore())
+	owners := make([]int64, maxBatchUsers)
+	for i := range owners {
+		owners[i] = int64(i + 1)
+	}
+	viewers := make([]int64, maxBatchViewerProjectionCells/maxBatchUsers+1)
+	for i := range viewers {
+		viewers[i] = int64(10_000 + i)
+	}
+	if _, err := svc.ByIDsForViewers(context.Background(), viewers, owners); !errors.Is(err, ErrBatchViewerCells) {
+		t.Fatalf("ByIDsForViewers err = %v, want ErrBatchViewerCells", err)
+	}
+	if !batchViewerProjectionCellsAllowed(1, maxBatchViewerProjectionCells) {
+		t.Fatal("cell limit rejected exact boundary")
+	}
+	if batchViewerProjectionCellsAllowed(2, maxBatchViewerProjectionCells) {
+		t.Fatal("cell limit accepted overflow boundary")
+	}
+}
+
+func TestByIDsForViewersRejectsMissingReferencedUser(t *testing.T) {
+	svc := NewService(memory.NewUserStore())
+	if _, err := svc.ByIDsForViewers(context.Background(), []int64{1001}, []int64{2001}); !errors.Is(err, ErrBatchUserMissing) {
+		t.Fatalf("ByIDsForViewers err = %v, want ErrBatchUserMissing", err)
+	}
+}
+
 func TestResolvePhoneHonorsAddedByPhone(t *testing.T) {
 	ctx := context.Background()
 	users := memory.NewUserStore()
@@ -122,6 +206,34 @@ func TestResolvePhoneHonorsAddedByPhone(t *testing.T) {
 	got, found, err := svc.ResolvePhone(ctx, viewer.ID, target.Phone)
 	if err != nil || !found || got.ID != target.ID {
 		t.Fatalf("ResolvePhone contact = %+v found=%v err=%v, want target", got, found, err)
+	}
+}
+
+func TestResolvePhoneKeepsCollectibleAliasSeparateFromE164Identity(t *testing.T) {
+	ctx := context.Background()
+	users := memory.NewUserStore()
+	viewer, err := users.Create(ctx, domain.User{AccessHash: 1, Phone: "15550001011", FirstName: "Viewer"})
+	if err != nil {
+		t.Fatalf("create viewer: %v", err)
+	}
+	target, err := users.Create(ctx, domain.User{AccessHash: 2, Phone: "15550001012", FirstName: "Target"})
+	if err != nil {
+		t.Fatalf("create target: %v", err)
+	}
+	asset := domain.CollectiblePhone{
+		Phone:       "8881111",
+		Tier:        domain.CollectiblePhoneTierExclusive,
+		Status:      domain.CollectibleUsernameStatusOwned,
+		OwnerUserID: target.ID,
+	}
+	svc := NewService(users, WithCollectiblePhoneStore(resolvePhoneCollectibleStore{asset: asset}))
+
+	got, found, err := svc.ResolvePhone(ctx, viewer.ID, "+888 1111")
+	if err != nil || !found || got.ID != target.ID {
+		t.Fatalf("ResolvePhone collectible = %+v found=%v err=%v, want target", got, found, err)
+	}
+	if got.Phone != asset.Phone {
+		t.Fatalf("projected phone = %q, want collectible %q", got.Phone, asset.Phone)
 	}
 }
 

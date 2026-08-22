@@ -6,6 +6,7 @@ import (
 
 	"github.com/iamxvbaba/td/proto"
 	"github.com/iamxvbaba/td/tg"
+	"github.com/iamxvbaba/td/tlprofile"
 
 	"telesrv/internal/domain"
 	"telesrv/internal/sfu"
@@ -24,7 +25,7 @@ type AuthService interface {
 	ResolveAuthKey(ctx context.Context, authKeyID [8]byte) ([8]byte, bool, error)
 	UserID(ctx context.Context, authKeyID [8]byte) (int64, bool, error)
 	PendingPasswordUserID(ctx context.Context, authKeyID [8]byte) (int64, bool, error)
-	CompletePasswordSignIn(ctx context.Context, authKeyID [8]byte) error
+	CompletePasswordSignIn(ctx context.Context, authKeyID [8]byte, expectedUserID int64) error
 	SendCode(ctx context.Context, phone string) (string, error)
 	CodeDelivery(ctx context.Context, phoneCodeHash string) (domain.AuthCodeDelivery, bool, error)
 	ResendCode(ctx context.Context, phone, phoneCodeHash string) (string, error)
@@ -190,13 +191,12 @@ type AuthKeyTargetedSessionBinder interface {
 	PushToUserExceptBusinessAuthKey(ctx context.Context, userID int64, excludeBusinessAuthKeyID [8]byte, t proto.MessageType, msg tg.UpdatesClass, timeout time.Duration) (int, error)
 }
 
-// ExactLayerTransientSessionBinder is the admission boundary for updates whose
-// constructors do not exist in older profiles. Implementations must filter the
-// live session index before encoding, skip unknown/not-ready profiles, and must
-// never queue the transient payload for later delivery.
-type ExactLayerTransientSessionBinder interface {
-	PushToUserTransientAtLeastLayer(ctx context.Context, userID int64, minLayer int, t proto.MessageType, msg tg.UpdatesClass, timeout time.Duration) (int, error)
-	PushToUserAuthKeyTransientAtLeastLayer(ctx context.Context, userID int64, businessAuthKeyID [8]byte, minLayer int, t proto.MessageType, msg tg.UpdatesClass, timeout time.Duration) (int, error)
+// SemanticTransientSessionBinder filters by generated exact-profile metadata
+// instead of a hard-coded minimum layer. A newly generated profile therefore
+// becomes eligible automatically when it has a wire constructor for semantic.
+type SemanticTransientSessionBinder interface {
+	PushToUserTransientCompatible(ctx context.Context, userID int64, semantic tlprofile.SemanticID, t proto.MessageType, msg tg.UpdatesClass, timeout time.Duration) (int, error)
+	PushToUserAuthKeyTransientCompatible(ctx context.Context, userID int64, businessAuthKeyID [8]byte, semantic tlprofile.SemanticID, t proto.MessageType, msg tg.UpdatesClass, timeout time.Duration) (int, error)
 }
 
 // OnlineUserProvider exposes a bounded runtime snapshot for best-effort fanout.
@@ -285,10 +285,18 @@ type TelegramLoginService interface {
 
 // BatchViewerUsersResolver 是 UsersService 的可选能力：跨多个 viewer 一次性投影同一组 user
 // （fan-out 模板化，把 per-recipient 的 ByIDs(=ForViewer) 折叠成 O(owner) 查询）。结果按 viewer
-// 与 ByIDs(viewer, ids) 字节等价（personal photo overlay 除外，见 users.ByIDsForViewers）。
-// 未实现时 fan-out 预热静默跳过，回退逐 viewer 解析（行为不变，仅退化为旧的 O(viewer) 成本）。
+// 与 ByIDs(viewer, ids) 字节等价，包含 viewer-specific personal photo overlay。
+// 声明需要 fan-out 预热的路径必须具备该能力；缺失或失败时在线 fan-out fail-closed，
+// 不得在同一请求里改走逐 recipient 查询。
 type BatchViewerUsersResolver interface {
 	ByIDsForViewers(ctx context.Context, viewerUserIDs []int64, userIDs []int64) (map[int64][]domain.User, error)
+}
+
+// SparseBatchViewerUsersResolver projects only the explicitly supplied
+// viewer->user edges. Local Durable Outbox uses this instead of widening one
+// claim into viewers x union(users).
+type SparseBatchViewerUsersResolver interface {
+	ByIDsForViewerUserIDs(ctx context.Context, userIDsByViewer map[int64][]int64) (map[int64][]domain.User, error)
 }
 
 // BotsService 抽象 bot 元数据查询与管理（bots.* RPC + userFull.bot_info hydrate）。
@@ -407,6 +415,7 @@ type AccountService interface {
 	GetPasswordSettings(ctx context.Context, userID int64, check domain.PasswordCheck) (domain.PrivatePasswordSettings, error)
 	UpdatePasswordSettings(ctx context.Context, userID int64, check domain.PasswordCheck, input domain.PasswordInputSettings) error
 	CheckPassword(ctx context.Context, userID int64, check domain.PasswordCheck) error
+	RevenueWithdrawalPasswordState(ctx context.Context, userID int64) (domain.RevenueWithdrawalPasswordState, error)
 	RequestPasswordRecovery(ctx context.Context, userID int64) (string, error)
 	CheckRecoveryPassword(ctx context.Context, userID int64, code string) error
 	RecoverPassword(ctx context.Context, userID int64, code string, input *domain.PasswordInputSettings) error
@@ -950,6 +959,18 @@ type EphemeralService interface {
 	ReportTarget(ctx context.Context, userID int64, device domain.EphemeralDevice, peer domain.Peer, id int) (domain.EphemeralMessage, error)
 }
 
+// WelcomeMessageService owns the independent durable Layer 229 peer templates.
+// It has no transient device, PTS, difference, push or outbox responsibility.
+type WelcomeMessageService interface {
+	Authorize(ctx context.Context, userID int64, peer domain.Peer) error
+	Create(ctx context.Context, userID int64, peer domain.Peer, randomID int64, content domain.WelcomeMessageContent) (domain.WelcomeMessage, bool, error)
+	Edit(ctx context.Context, userID int64, peer domain.Peer, id int, fields domain.WelcomeMessageEditFields) (domain.WelcomeMessage, error)
+	List(ctx context.Context, userID int64, peer domain.Peer, hash int64) (domain.WelcomeMessageList, error)
+	Delete(ctx context.Context, userID int64, peer domain.Peer, id int) (bool, error)
+	DeleteAll(ctx context.Context, userID int64, peer domain.Peer) (bool, error)
+	HasAny(ctx context.Context, peer domain.Peer) (bool, error)
+}
+
 // ModerationService accepts only final report choices. Implementations must
 // validate and snapshot referenced evidence, then durably commit the immutable
 // submission before returning success.
@@ -1062,6 +1083,7 @@ type Deps struct {
 	AICompose               AIComposeService
 	Ephemeral               EphemeralService
 	EphemeralPush           store.EphemeralPushBroker
+	WelcomeMessages         WelcomeMessageService
 	Moderation              ModerationService
 	Users                   UsersService
 	Usernames               UsernameRegistryService
